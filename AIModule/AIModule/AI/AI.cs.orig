@@ -1,0 +1,1831 @@
+﻿using AIModule.Events;
+using RabbitMQ.Client;
+using System.Text;
+using System.Text.Json;
+using RabbitMQ.Client.Events;
+using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Driver;
+using MongoDB.Bson;
+using AIModule.Common.constant;
+using System.Diagnostics;
+using System.Threading.Channels;
+using System.IO;
+using AIModule.Fight;
+using AIModule.Report;
+using AIModule.Owners;
+using AIModule.Bases;
+using AIModule.Common.constant.fleet;
+using System;
+using Microsoft.Extensions.Logging;
+using System.Text.Json.Nodes;
+using AIModule.Quest;
+using System.Numerics;
+using AIModule.Reputation;
+using AIModule.Common;
+using System.Net.Mime;
+using YamlDotNet.Core.Tokens;
+using static MongoDB.Driver.WriteConcern;
+using AIModule.Common.constant.owner;
+using AIModule.Common.constant.Base;
+using static AIModule.Common.constant.owner.Personality;
+using System.Linq;
+using MongoDB.Driver.Core.Bindings;
+using YamlDotNet.Core.Events;
+using AIModule.Planet;
+using SharpCompress.Common;
+using System.Collections.Immutable;
+using static System.Net.WebRequestMethods;
+
+namespace AIModule.AI
+{
+    [BsonIgnoreExtraElements]
+    public abstract class AI : Owner
+    {
+        #region Properties
+
+        public string personality { get; set; }
+
+        public string allianceId { get; set; }
+
+        public string allianceName { get; set; }
+
+        public Dictionary<string, TemplateElement> fleetTemplates { get; set; } = new Dictionary<string, TemplateElement>();
+
+        public Dictionary<string, List<string>> fleetIdsGroupedByType { get; set; } = new Dictionary<string, List<string>>();
+
+        public List<string> enemyAllianceIds { get; set; } = new List<string>();
+
+        public Dictionary<string, string> splitFleets { get; set; } = new Dictionary<string, string>();
+        public List<string> questTemplates { get; set; } = new List<string>();
+
+        #endregion
+
+        #region Champs
+        private DateTime lastFleetBuildTime;
+        private DateTime lastFleetReplenishTime;
+
+        private string preferedResource;
+
+        private DateTime lastSleepTime;
+
+        private Dictionary<string, Dictionary<PlayerElement, Object>> playersDictionary = new Dictionary<string, Dictionary<PlayerElement, object>>();
+
+        private int maxPowerAttackFleet = 0;
+        private int maxPowerDefenseFleet = 0;
+        private int maxPowerDeliveryFleet = 0;
+        private int maxPowerTurretFleet = 0;
+
+        private Dictionary<string, int> storageCapacities = new Dictionary<string, int>();
+        #endregion
+
+        protected AI()
+        {
+            lastFleetBuildTime = DateTime.Now;
+            lastFleetReplenishTime = DateTime.Now;
+            var rand = new Random();
+            preferedResource = Values.ressources[rand.Next(4)];
+            _class = "ai";
+        }
+
+
+        //Method to run in the AI thread
+        public virtual void runAI(ConnectionFactory factory)
+        {
+            // TODO : à utiliser ?
+            var database = MongoDBSingleton.Instance().database;
+            var reputationCollection = database.GetCollection<BsonDocument>("reputation");
+            lastSleepTime = DateTime.Now;
+
+            Console.WriteLine(name);
+
+            //Initialisation liste joueurs avec lesquels interagir
+            foreach (var player in MongoDBSingleton.Instance().usersCollection.AsQueryable().Where(x => x.type == OwnerTypeConstant.PLAYER).Select(x => x.id))
+            {
+                TryAddPlayerToConsideredPlayers(player);
+            }
+
+
+            maxPowerAttackFleet = fleetTemplates[AIFleetTypes.attackFleet].maxFleetNumber * fleetTemplates[AIFleetTypes.attackFleet].fleetPower;
+
+            maxPowerDefenseFleet = fleetTemplates[AIFleetTypes.defenseFleet].maxFleetNumber * fleetTemplates[AIFleetTypes.defenseFleet].fleetPower;
+
+            maxPowerTurretFleet = fleetTemplates[AIFleetTypes.turretFleet].maxFleetNumber * fleetTemplates[AIFleetTypes.turretFleet].fleetPower;
+
+            maxPowerDeliveryFleet = fleetTemplates[AIFleetTypes.deliveryFleet].maxFleetNumber * fleetTemplates[AIFleetTypes.deliveryFleet].fleetPower;
+
+
+            var aifilter = Builders<Base>.Filter.Eq(x => x.id, mainBaseId);
+            var aibase = MongoDBSingleton.Instance().basesCollection.Find(aifilter).First();
+            foreach (KeyValuePair<string, RessourceCumul> keyValuePair in aibase.ressources)
+            {
+                storageCapacities.Add(keyValuePair.Key, keyValuePair.Value.storage);
+            }
+
+            Random rand = new Random();
+
+            Event? receivedEvent;
+            EventResult? eventResult;
+            int eventCount = 0;
+            using (var connection = factory.CreateConnection())
+            using (var channel = connection.CreateModel())
+            {
+                channel.ExchangeDeclare(exchange: "aiEventsExchange",
+                                        durable: true,
+                                        type: ExchangeType.Direct);
+
+                var queueName = channel.QueueDeclare().QueueName;
+
+                channel.QueueDeclare(queue: "toSchedule",
+                                durable: false,
+                                exclusive: false,
+                                autoDelete: false,
+                                arguments: null);
+
+                channel.QueueBind(queue: queueName,
+                    exchange: "aiEventsExchange",
+                    routingKey: "event");
+
+                var queueName2 = channel.QueueDeclare().QueueName;
+
+                channel.QueueBind(queue: queueName2,
+                    exchange: "aiEventsExchange",
+                    routingKey: "eventResult");
+
+                var properties = channel.CreateBasicProperties();
+                properties.ContentType = "application/json";
+                properties.Headers = new Dictionary<string, object>();
+                properties.Headers.Add("__TypeId__", "fr.need_a_name.bdd_module.event.entity.Event");
+                properties.DeliveryMode = 2;
+                properties.Priority = 0;
+                properties.ContentEncoding = "UTF-8";
+
+                var eventConsumer = new EventingBasicConsumer(channel);
+                eventConsumer.Received += (model, ea) =>
+                {
+                    var body = ea.Body.ToArray();
+                    var message = Encoding.UTF8.GetString(body);
+                    receivedEvent = JsonSerializer.Deserialize<Event>(message);
+                    if (receivedEvent != null)
+                    {
+                        //Console.WriteLine(message);
+                        // Console.WriteLine("received event of type {0}", receivedEvent.type);
+
+                        //Console.WriteLine(" [x] Received {0}", message);
+
+
+                        //Traitement des events reçus ici
+                        switch (receivedEvent.type)
+                        {
+                            case EventTypeConstant.MOVE:
+                                {
+                                    try
+                                    {
+                                        var moveEvent = MongoDBSingleton.Instance().moveEventsCollection.Find(Builders<FleetMoveEvent>.Filter.Eq(x => x.id, receivedEvent.id)).First();
+                                        if (Enum.Parse<FleetObjectives>(moveEvent.objectif) == FleetObjectives.ATTACK)
+                                        {
+                                            var aiBasePosition = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.id, mainBaseId)).First().position;
+                                            var interventionProb = rand.Next(1001) / 1000f;
+                                            //On cherche un allié ou un ennemi dans la liste des concernés
+                                            var allies = (from p in moveEvent.userIds
+                                                          where allyIds.Contains(p)
+                                                          select p).ToList();
+                                            //Si on trouve un allié de chaque côté, l'IA n'intervient pas
+                                            if (allies.Count == 1)
+                                            {
+                                                var defenderBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.position, moveEvent.location)).First();
+                                                var attackerBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.position, moveEvent.origine)).First();
+                                                if (interventionProb < Values.helpDefendProbability && allies[0] == defenderBase.ownerId)
+                                                //if (true)
+                                                {
+                                                    //Chance d'aider le défenseur en envoyant une flotte en soutien
+                                                    //Voir avec Mikrowd si après le combat en soutien, flotte revient
+                                                    var attackerId = (from i in moveEvent.userIds where i != allies[0] select i).ToList()[0];
+                                                    var attacker = MongoDBSingleton.Instance().usersCollection.Find(Builders<User>.Filter.Eq(x => x.id, attackerId)).First();
+                                                    var defender = MongoDBSingleton.Instance().usersCollection.Find(Builders<User>.Filter.Eq(x => x.id, allies[0])).First();
+                                                    TryLaunchDefendFleet(aiBasePosition, moveEvent.fleetId, attacker, defender, defenderBase, channel, properties);
+                                                    goto AckEvent;
+                                                }
+                                                else if (interventionProb < Values.helpAttackProbability && allies[0] == attackerBase.ownerId)
+                                                //else if (true)
+                                                {
+                                                    //Chance d'aider l'attaquant en envoyant une flotte d'attaque
+                                                    var targetId = (from i in moveEvent.userIds where i != allies[0] select i).ToList()[0];
+                                                    var target = MongoDBSingleton.Instance().usersCollection.Find(Builders<User>.Filter.Eq(x => x.id, targetId)).First();
+                                                    TryLaunchAttackFleet(aiBasePosition, target, rand, channel, properties, true);
+                                                    goto AckEvent;
+                                                }
+                                            }
+                                            //Si on trouve un ennemi de chaque côté, l'IA n'intervient pas
+                                            var enemies = (from p in moveEvent.userIds
+                                                           where enemyIds.Contains(p)
+                                                           select p).ToList();
+                                            if (enemies.Count == 1)
+                                            {
+                                                var defenderBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.position, moveEvent.location)).First();
+                                                var attackerBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.position, moveEvent.origine)).First();
+                                                if (interventionProb < Values.helpAttackProbability && enemies[0] == defenderBase.ownerId)
+                                                {
+                                                    //Chance d'attaquer le défenseur
+                                                    //Voir avec Mikrowd si après le combat en soutien, flotte revient
+                                                    var target = MongoDBSingleton.Instance().usersCollection.Find(Builders<User>.Filter.Eq(x => x.id, enemies[0])).First();
+                                                    TryLaunchAttackFleet(aiBasePosition, target, rand, channel, properties, true);
+                                                    goto AckEvent;
+                                                }
+                                                else if (interventionProb < Values.helpDefendProbability && enemies[0] == attackerBase.ownerId)
+                                                {
+                                                    //Chance d'aider le défenseur
+                                                    var defenderId = (from i in moveEvent.userIds where i != enemies[0] select i).ToList()[0];
+                                                    var defender = MongoDBSingleton.Instance().usersCollection.Find(Builders<User>.Filter.Eq(x => x.id, defenderId)).First();
+                                                    var attacker = MongoDBSingleton.Instance().usersCollection.Find(Builders<User>.Filter.Eq(x => x.id, enemies[0])).First();
+                                                    TryLaunchDefendFleet(aiBasePosition, moveEvent.fleetId, attacker, defender, defenderBase, channel, properties);
+                                                    goto AckEvent;
+                                                }
+                                            }
+
+                                        }
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        Utilies.WriteErrorLog(e, this);
+                                    }
+                                    break;
+                                }
+
+
+
+                            //Traiter les échanges, demande de troupes, pillage de convois (?)
+                            default:
+                                break;
+                        }
+                    }
+                AckEvent:
+                    channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false);
+                };
+
+                var eventResultConsumer = new EventingBasicConsumer(channel);
+                eventResultConsumer.Received += (model, ea) =>
+                {
+                    var body = ea.Body.ToArray();
+                    var message = Encoding.UTF8.GetString(body);
+                    var eventResult = JsonSerializer.Deserialize<EventResult>(message);
+
+                    try
+                    {
+                        //Traitement des events reçus ici
+                        switch (eventResult.eventType)
+                        {
+
+                            case EventTypeConstant.MOVE:
+                                {
+                                    Utilies.WriteEventResultReceivedLog(eventResult, this);
+                                    ManageMoveEventResult(eventResult);
+                                    break;
+                                }
+
+                            case EventTypeConstant.FIGHT:
+                                {
+                                    Utilies.WriteEventResultReceivedLog(eventResult, this);
+                                    ManageFightEventResult(eventResult, rand, channel, properties);
+                                    break;
+                                }
+
+                            case EventTypeConstant.QUEST:
+                                {
+                                    Utilies.WriteEventResultReceivedLog(eventResult, this);
+                                    ManageQuestEventResult(eventResult);
+                                    break;
+                                }
+
+                            case EventTypeConstant.NEW_USER:
+                                {
+                                    Utilies.WriteEventResultReceivedLog(eventResult, this);
+                                    ManageNewUserEventResult(eventResult);
+                                    break;
+                                }
+                            //Traiter les échanges, demande de troupes, pillage de convois (?)
+                            default:
+                                break;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Utilies.WriteErrorLog(e, this);
+                    }
+
+                    channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false);
+                };
+
+                channel.BasicConsume(queue: queueName,
+                                 autoAck: false,
+                                 consumer: eventConsumer);
+
+                channel.BasicConsume(queue: queueName2,
+                                 autoAck: false,
+                                 consumer: eventResultConsumer);
+
+
+
+                while (true)
+                {
+                    AIBehaviorLoop(rand, channel, properties);
+                }
+            }
+        }
+
+        public void ChooseAndExecuteAction(Random rand, string player, IModel channel, IBasicProperties properties, float reputation, Base mainBase)
+        {
+            updateFleets();
+            ReputationStatus playerReputationStatus = Utilies.getPlayerReputationStatus(reputation);
+
+            var playerFilter = Builders<User>.Filter.Eq(x => x.id, player);
+            var playerOwner = MongoDBSingleton.Instance().usersCollection.Find(playerFilter).First();
+
+
+            ChooseAndExecuteAttack(rand, player, channel, properties, mainBase, playerOwner, playerReputationStatus);
+            ChooseAndExecuteQuest(rand, player, playerReputationStatus);
+            ChooseAndExecuteGift(rand, player, channel, properties, mainBase, playerOwner, playerReputationStatus, reputation);
+
+            // TODO : Proposer alliance / déclaration guerre selon la réputation
+
+            UpdateAlliesEnemies(player, reputation);
+
+            updateFleets();
+        }
+
+        private void ChooseAndExecuteAttack(Random rand, string player, IModel channel, IBasicProperties properties, Base mainBase, User playerOwner, ReputationStatus playerReputationStatus)
+        {
+            float attack_prob = rand.Next(1001) / 1000f;
+
+            if (attack_prob < Convert.ToDouble(playersDictionary[player][PlayerElement.AttackProbabilityBonus]) &&
+                fleetListId.Count > 0 &&
+                DateTime.Now.CompareTo(((DateTime)playersDictionary[player][PlayerElement.LastAttackTime]).AddSeconds(Values.attackCooldown)) > 0)
+            {
+                TryLaunchAttackFleet(mainBase.position, playerOwner, rand, channel, properties, false);
+            }
+            else
+            {
+                playersDictionary[player][PlayerElement.AttackProbabilityBonus] = Math.Min(Math.Max(0,
+                    Convert.ToDouble(playersDictionary[player][PlayerElement.AttackProbabilityBonus]) +
+                    Values.interactionsProbabilitiesInformations[(personality, InteractionType.Attack, InteractionInformation.ProbabilityBonus, playerReputationStatus)]),
+                    Values.interactionsProbabilitiesInformations[(personality, InteractionType.Attack, InteractionInformation.MaximumProbability, playerReputationStatus)]);
+            }
+        }
+
+        private void ChooseAndExecuteQuest(Random rand, string player, ReputationStatus playerReputationStatus)
+        {
+            float quest_prob = rand.Next(1001) / 1000f;
+
+            if (quest_prob < Convert.ToDouble(playersDictionary[player][PlayerElement.QuestProbabilityBonus]))
+            {
+                //Donner une quête au joueur
+
+
+                var objective = rand.Next(1, 4);
+
+                var waitingQuest = new WaitingQuest();
+                waitingQuest.id = null;
+                waitingQuest.passiveObjectives = null;
+                waitingQuest.name = string.Format("AI {0} quest", name);
+                var activeObjectives = new QuestActiveObjective();
+                waitingQuest.activesObjectives = new List<QuestActiveObjective>();
+                switch (personality)
+                {
+                    case Pacifist:
+                        waitingQuest.description = string.Format("Le NPC {0} vous demande de faire des fouilles.", name);
+                        activeObjectives.type = EventResultTypeConstants.SEARCH_SIZE;
+                        activeObjectives.description = string.Format("Fouillez {0} cases", objective);
+                        //Comment définir les objectifs actifs ? => voir avec Mikrowd
+                        activeObjectives.objectives = new Dictionary<string, int>()
+                        {
+                            { "",objective },
+                        };
+                        waitingQuest.activesObjectives.Add(activeObjectives);
+                        activeObjectives.isOptional = false;
+                        break;
+                    case Trader:
+                        waitingQuest.description = string.Format("Le NPC {0} vous demande de livrer des ressources.", name);
+                        activeObjectives.type = EventResultTypeConstants.DELIVERED_RESOURCES;
+                        activeObjectives.description = string.Format("Livrz {0} de chaque ressource", objective * 1000);
+                        //Comment définir les objectifs actifs ? => voir avec Mikrowd
+                        activeObjectives.objectives = new Dictionary<string, int>()
+                        {
+                            { RessourcesConstant.METAL,objective * 1000 },
+                            { RessourcesConstant.ENERGY,objective * 1000 },
+                            { RessourcesConstant.ORGANIC,objective * 1000 },
+                            { RessourcesConstant.CRISTAL,objective * 1000 },
+                        };
+                        waitingQuest.activesObjectives.Add(activeObjectives);
+                        activeObjectives.isOptional = false;
+                        break;
+                    case Warmonger:
+                        waitingQuest.description = string.Format("Le NPC {0} vous demande de piller des ressources", name);
+                        activeObjectives.type = EventResultTypeConstants.PILLED_RESOURCES;
+                        activeObjectives.description = string.Format("Pillez {0} de chaque ressource.", objective * 100);
+                        //Comment définir les objectifs actifs ? => voir avec Mikrowd
+                        activeObjectives.objectives = new Dictionary<string, int>()
+                        {
+                            { RessourcesConstant.METAL,objective * 100 },
+                            { RessourcesConstant.ENERGY,objective * 100 },
+                            { RessourcesConstant.ORGANIC,objective * 100 },
+                            { RessourcesConstant.CRISTAL,objective * 100 },
+                        };
+                        waitingQuest.activesObjectives.Add(activeObjectives);
+                        activeObjectives.isOptional = false;
+                        break;
+
+                }
+                waitingQuest.userId = new List<string>()
+                {
+                    player
+                };
+                waitingQuest.sponsorId = id;
+                //Important d'avoir isRejectable à 'true'
+                waitingQuest.isRejectable = true;
+                waitingQuest.templateUuid = Guid.NewGuid().ToString();
+                waitingQuest.questRewards = new List<QuestReward>();
+                var questReward = new QuestReward();
+                questReward.entityId = id;
+                questReward.type = QuestRewardConstant.FAME;
+                questReward.value = 1;
+                waitingQuest.questRewards.Add(questReward);
+                int quantity = 0;
+                foreach(var resource in playerMainBase.ressources.Keys)
+                {
+                    quantity = (int)(playerMainBase.ressources[resource].production * 0.33f);
+                    waitingQuest.questRewards.Add(new QuestReward(QuestRewardConstant.RESOURCE, resource, quantity));
+                }
+                MongoDBSingleton.Instance().waitingQuestsCollection.InsertOne(waitingQuest);
+
+<<<<<<< HEAD
+                WriteEventCreationLog("QuestEvent", waitingQuest.id);
+=======
+
+                Utilies.WriteEventCreationLog("QuestEvent", waitingQuest.id, this);
+>>>>>>> 0f7cb9f4b787e8cc25da947a74e66ffac32c4e52
+                playersDictionary[player][PlayerElement.QuestProbabilityBonus] = 0;
+            }
+            else
+            {
+                playersDictionary[player][PlayerElement.QuestProbabilityBonus] = Math.Min(Math.Max(0,
+                    Convert.ToDouble(playersDictionary[player][PlayerElement.QuestProbabilityBonus]) +
+                    Values.interactionsProbabilitiesInformations[(personality, InteractionType.Quest, InteractionInformation.ProbabilityBonus, playerReputationStatus)]),
+                    Values.interactionsProbabilitiesInformations[(personality, InteractionType.Quest, InteractionInformation.MaximumProbability, playerReputationStatus)]);
+            }
+        }
+
+        private void ChooseAndExecuteGift(Random rand, string player, IModel channel, IBasicProperties properties, Base mainBase, User playerOwner, ReputationStatus playerReputationStatus, float reputation)
+        {
+            var playerBaseFilter = Builders<Base>.Filter.Eq(x => x.id, playerOwner.mainBaseId);
+            var playerMainBase = MongoDBSingleton.Instance().basesCollection.Find(playerBaseFilter).First();
+            FleetMoveEvent? moveEvent = null;
+
+            float gift_prob = rand.Next(1001) / 1000f;
+
+            if (gift_prob < Convert.ToDouble(playersDictionary[player][PlayerElement.GiftProbabilityBonus]))
+            {
+                //Faire un cadeau au joueur
+                var gift = new Dictionary<string, int>()
+                    {
+                        {RessourcesConstant.CRISTAL, (int)(20*(Utilies.getReputationRatio(reputation) - Values.neutralThresholdFactor) * mainBase.ressources[RessourcesConstant.CRISTAL].storage) },
+                        {RessourcesConstant.METAL, (int)(20*(Utilies.getReputationRatio(reputation) - Values.neutralThresholdFactor) * mainBase.ressources[RessourcesConstant.METAL].storage) },
+                        {RessourcesConstant.ORGANIC, (int)(20*(Utilies.getReputationRatio(reputation) - Values.neutralThresholdFactor) * mainBase.ressources[RessourcesConstant.ORGANIC].storage) },
+                        {RessourcesConstant.ENERGY, (int)(20*(Utilies.getReputationRatio(reputation) - Values.neutralThresholdFactor) * mainBase.ressources[RessourcesConstant.ENERGY].storage) }
+                    };
+
+                for (int i = 0; i < fleetIdsGroupedByType[AIFleetTypes.deliveryFleet].Count; i++)
+                {
+                    var fleetFilter = Builders<Fleet>.Filter.Eq(x => x.id, fleetIdsGroupedByType[AIFleetTypes.deliveryFleet][i]);
+
+                    if (MongoDBSingleton.Instance().fleetsCollection.Find(fleetFilter).CountDocuments() == 0)
+                    {
+                        fleetListId.Remove(fleetIdsGroupedByType[AIFleetTypes.deliveryFleet][i]);
+                        if (type == OwnerTypeConstant.AI_DELTA)
+                        {
+                            var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.fleetListId, fleetListId);
+                            MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                        }
+                        else
+                        {
+                            var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.fleetListId, fleetListId);
+                            MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                        }
+                    }
+                    else
+                    {
+                        var fleet = MongoDBSingleton.Instance().fleetsCollection.Find(fleetFilter).First();
+                        bool fleetUsable = fleet.status != FleetStatusConstant.MOVING && fleet.status != FleetStatusConstant.FIGHTING && fleet.status != FleetStatusConstant.TRANSITING;
+                        if (fleetUsable)
+                        {
+                            //Quid du cas où le joueur est sur une autre planète ? On ne traite pas ce cas dans un premier temps
+                            //Penser à ajouter les ressources en soute de la flotte/escouade
+                            //-> Remplir les soutes jusquà ce que plus de place
+                            foreach (var key in fleet.squadrons.Keys)
+                            {
+                                int quantity = Math.Min(fleet.squadrons[key].cumulatedStorageCapacity, gift.Values.Sum());
+                                fleet.squadrons[key].currentStorage = quantity;
+                                fleet.squadrons[key].storage = new Dictionary<string, int>()
+                                    {
+                                        {RessourcesConstant.ORGANIC, quantity/4 },
+                                        {RessourcesConstant.METAL, quantity/4 },
+                                        {RessourcesConstant.CRISTAL, quantity/4 },
+                                        {RessourcesConstant.ENERGY, quantity/4 }
+                                    };
+                                foreach (var res in gift.Keys)
+                                {
+                                    gift[res] -= quantity / 4;
+                                    mainBase.ressources[res].addAndRefresh(-1 * quantity / 4);
+                                }
+                                //Mettre à jour les squadrons en BDD
+                                var fleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons[key], fleet.squadrons[key]);
+                                MongoDBSingleton.Instance().fleetsCollection.UpdateOne(fleetFilter, fleetUpdate);
+
+                                if (gift.Values.Sum() < 4)
+                                    break;
+                            }
+                            moveEvent = MoveManager.GetInstance().launchMove(fleet, playerMainBase.position, mainBase.position, FleetObjectives.DELIVERY, "AI " + name + " sends resources to player", 0);
+                            Utilies.SendEvent(moveEvent, channel, properties);
+                            break;
+                        }
+                    }
+                }
+                if (moveEvent != null)
+                {
+                    Utilies.WriteEventCreationLog("MoveEvent", moveEvent.id, this);
+                    playersDictionary[player][PlayerElement.GiftProbabilityBonus] = 0;
+                    moveEvent = null;
+                }
+            }
+            else
+            {
+                playersDictionary[player][PlayerElement.GiftProbabilityBonus] = Math.Min(Math.Max(0,
+                    Convert.ToDouble(playersDictionary[player][PlayerElement.GiftProbabilityBonus]) +
+                    Values.interactionsProbabilitiesInformations[(personality, InteractionType.Gift, InteractionInformation.ProbabilityBonus, playerReputationStatus)]),
+                    Values.interactionsProbabilitiesInformations[(personality, InteractionType.Gift, InteractionInformation.MaximumProbability, playerReputationStatus)]);
+            }
+            var baseUpdate = Builders<Base>.Update.Set(x => x.ressources, mainBase.ressources);
+            MongoDBSingleton.Instance().basesCollection.UpdateOne(Builders<Base>.Filter.Eq(x => x.id, mainBaseId), baseUpdate);
+        }
+
+        //Prix minimum à payer pour une transaction; dépend de la réputation avec l'IA; varie entre 2 fois et 1/2 fois le prix du marché.
+        //Si le prix total de l'échange proposé par le joueur est < au prix demandé par l'IA, alors l'échange doit être refusé.
+        //A l'inverse, si le prix proposé par le joueur est > au prix demandé, alors l'échange est accepté et la différence de valeur est convertie en
+        //gain de réputation
+        private float PriceForTransaction(int cristal, int organic, int metal, int energy, int ship, float reputation)
+        {
+            var baseFilter = Builders<Base>.Filter.Eq(x => x.id, mainBaseId);
+            var Base = MongoDBSingleton.Instance().basesCollection.Find(baseFilter).First();
+            var totalValue = Base.ressources[RessourcesConstant.METAL].amount * Values.marketPrices[RessourcesConstant.METAL] + Base.ressources[RessourcesConstant.ORGANIC].amount * Values.marketPrices[RessourcesConstant.ORGANIC] +
+                Base.ressources[RessourcesConstant.CRISTAL].amount * Values.marketPrices[RessourcesConstant.CRISTAL] + Base.ressources[RessourcesConstant.ENERGY].amount * Values.marketPrices[RessourcesConstant.ENERGY];
+
+            var preferedFactor = preferedResource.Equals(RessourcesConstant.METAL) ? Values.ressourcePreferenceFactor : 1f;
+            var metalPrice = Values.marketPrices[RessourcesConstant.METAL] * preferedFactor * (float)Math.Exp(-1 * Values.ressourceSaturationFactor * Base.ressources[RessourcesConstant.METAL].amount / totalValue);
+
+            preferedFactor = preferedResource.Equals(RessourcesConstant.CRISTAL) ? Values.ressourcePreferenceFactor : 1f;
+            var cristalPrice = Values.marketPrices[RessourcesConstant.CRISTAL] * preferedFactor * (float)Math.Exp(-1 * Values.ressourceSaturationFactor * Base.ressources[RessourcesConstant.CRISTAL].amount / totalValue);
+
+            preferedFactor = preferedResource.Equals(RessourcesConstant.ENERGY) ? Values.ressourcePreferenceFactor : 1f;
+            var energyPrice = Values.marketPrices[RessourcesConstant.ENERGY] * preferedFactor * (float)Math.Exp(-1 * Values.ressourceSaturationFactor * Base.ressources[RessourcesConstant.ENERGY].amount / totalValue);
+
+            preferedFactor = preferedResource.Equals(RessourcesConstant.ORGANIC) ? Values.ressourcePreferenceFactor : 1f;
+            var organicPrice = Values.marketPrices[RessourcesConstant.ORGANIC] * preferedFactor * (float)Math.Exp(-1 * Values.ressourceSaturationFactor * Base.ressources[RessourcesConstant.ORGANIC].amount / totalValue);
+
+            float totalPrice = metalPrice * metal + organicPrice * organic + energyPrice * energy + cristalPrice * cristal + ship * Values.marketPrices["ship"];
+            float rep = (Values.maxReputation - reputation) / (Values.maxReputation - Values.minReputation);
+            totalPrice = (4 / 3 - rep) * 3 / 2 * totalPrice;
+            return totalPrice;
+        }
+
+        private void replenishFleet(Fleet fleet, Fleet template, string fleetType)
+        {
+            fleet.power = 0;
+            fleet.squadrons = new Dictionary<string, Squadron>();
+            foreach (var (squadron, newTechId) in from squadron in template.squadrons
+                                                  let newTechId = Guid.NewGuid().ToString()
+                                                  select (squadron, newTechId))
+            {
+                squadron.Value.fleetId = fleet.id;
+                squadron.Value.techId = newTechId;
+                fleet.squadrons[newTechId] = squadron.Value;
+                fleet.power += squadron.Value.cumulatedPower;
+            }
+            if (fleetType != AIFleetTypes.deliveryFleet && fleetType != AIFleetTypes.turretFleet)
+            {
+                float threshold = Values.fleetReplenishThreshold[(int)Enum.Parse<PersonalityEnum>(personality)];
+                for (int i = 0; i < fleet.squadrons.Count; i++)
+                {
+                    var key = fleet.squadrons.Keys.ToList()[i];
+                    fleet.squadrons[key].amount = (int)Math.Ceiling(threshold * fleet.squadrons[key].amount);
+                    fleet.squadrons[key].cumulatedPower = (int)Math.Ceiling(threshold * fleet.squadrons[key].cumulatedPower);
+                }
+            }
+            var update = Builders<Fleet>.Update.Set(x => x.squadrons, fleet.squadrons);
+            MongoDBSingleton.Instance().fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, fleet.id), update);
+
+            Utilies.WriteEventCreationLog("ReplenishFleet", fleet.id, this);
+        }
+
+        private Fleet createFleet(string fleetTemplate, string fleetType)
+        {
+
+            var fleetsCollection = MongoDBSingleton.Instance().database.GetCollection<Fleet>("fleets");
+            var basesCollection = MongoDBSingleton.Instance().database.GetCollection<Base>("bases");
+
+            var builder = Builders<Fleet>.Filter;
+            var fleetFilter = builder.Eq("name", fleetTemplate) & builder.Eq("type", FleetTypeConstant.TEMPLATE);
+            Fleet templ = fleetsCollection.Find(fleetFilter).First();
+            Fleet fleet = templ;
+            fleet.id = null;
+            fleet.name = String.Format("{0}'s fleet", name);
+            if (fleetType == AIFleetTypes.defenseFleet || fleetType == AIFleetTypes.turretFleet)
+            {
+                fleet.status = FleetStatusConstant.PATROLLING;
+            }
+            else
+            {
+                switch (personality)
+                {
+                    case Pacifist:
+                        fleet.status = FleetStatusConstant.INACTIVE;
+                        break;
+                    case Warmonger:
+                        fleet.status = FleetStatusConstant.PATROLLING;
+                        break;
+                    case Trader:
+                        fleet.status = FleetStatusConstant.STANDBY;
+                        break;
+                }
+            }
+
+            var baseFilter = Builders<Base>.Filter.Eq(x => x.id, mainBaseId);
+
+            fleet.position = basesCollection.Find(baseFilter).First().position;
+            fleet.type = FleetTypeConstant.NPC;
+            fleet.ownerName = name;
+            fleet.ownerId = id;
+            fleet.linkedBaseId = mainBaseId;
+
+            fleet.pillageRate = new Dictionary<string, int>
+            {
+                { RessourcesConstant.CRISTAL, 25 },
+                { RessourcesConstant.ORGANIC, 25 },
+                { RessourcesConstant.METAL, 25 },
+                { RessourcesConstant.ENERGY, 25 }
+            };
+
+            fleetsCollection.InsertOne(fleet);
+
+            Dictionary<string, Squadron> newSquad = new Dictionary<string, Squadron>();
+
+            foreach (var squadron in fleet.squadrons)
+            {
+                string newTechId = Guid.NewGuid().ToString();
+                squadron.Value.fleetId = fleet.id;
+                squadron.Value.techId = newTechId;
+                newSquad[newTechId] = squadron.Value;
+            }
+            fleet.squadrons = newSquad;
+
+
+            int power = 0;
+            int speed = 1000;
+            int minRange = 1000;
+            int maxRange = 0;
+            int consumption = 1;
+            int staticConsummation = 0;
+            int amount = 0;
+            int cumulatedFuelTank = 1000000;
+
+            Dictionary<string, int> capacities = new Dictionary<string, int>();
+            Dictionary<string, Squadron> squadronMap = new Dictionary<string, Squadron>();
+            foreach (var entry in fleet.squadrons)
+            {
+                Squadron squadron = entry.Value;
+                squadronMap[entry.Key] = squadron;
+
+                power += squadron.cumulatedPower;
+                if (squadron.speed < speed)
+                {
+                    speed = squadron.speed;
+                }
+                if (squadron.range < minRange)
+                {
+                    minRange = squadron.range;
+                }
+                if (squadron.range > maxRange)
+                {
+                    maxRange = squadron.range;
+                }
+                foreach (var capacity in squadron.cumulatedCapacities)
+                {
+                    if (capacities.ContainsKey(capacity.Key))
+                    {
+                        capacities[capacity.Key] = capacities[capacity.Key] + capacity.Value;
+                    }
+                    else
+                    {
+                        capacities[capacity.Key] = capacity.Value;
+                    }
+                }
+                amount += squadron.amount;
+            }
+
+            fleet.capacities = (capacities);
+            fleet.power = (power);
+            fleet.speed = ((speed == 1000) ? 0 : speed);
+            fleet.staticConsumption = (staticConsummation);
+            fleet.minRange = ((minRange == 1000) ? 0 : minRange);
+            fleet.maxRange = (maxRange);
+            fleet.consumption = (consumption);
+            fleet.amount = (amount);
+            fleet.cumulatedFuelTank = (cumulatedFuelTank);
+            fleet.squadrons = (squadronMap);
+            fleet.currentFuel = 1000000;
+            fleet.fuelTime = 1000000;
+
+            var newFleetFilter = Builders<Fleet>.Filter.Eq(x => x.id, fleet.id);
+            var newFleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons, fleet.squadrons).Set(x => x.capacities, fleet.capacities).
+                        Set(x => x.power, fleet.power).Set(x => x.speed, fleet.speed).Set(x => x.staticConsumption, fleet.staticConsumption).
+                        Set(x => x.minRange, fleet.minRange).Set(x => x.maxRange, fleet.maxRange).Set(x => x.consumption, fleet.consumption).
+                        Set(x => x.amount, fleet.amount).Set(x => x.cumulatedFuelTank, fleet.cumulatedFuelTank).Set(x => x.currentFuel, fleet.currentFuel).
+                        Set(x => x.fuelTime, fleet.fuelTime);
+            fleetsCollection.UpdateOne(newFleetFilter, newFleetUpdate);
+            fleetListId.Add(fleet.id);
+            fleetIdsGroupedByType[fleetType].Add(fleet.id);
+            if (type == OwnerTypeConstant.AI_DELTA)
+            {
+                var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+            }
+            else
+            {
+                var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+            }
+            Utilies.WriteEventCreationLog("build_fleet", fleet.id, this);
+            return fleet;
+
+        }
+
+        private void updateFleetsSquadrons(string fleetType)
+        {
+            for (int i = fleetIdsGroupedByType[fleetType].Count - 1; i >= 0; i--)
+            {
+                if (MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, fleetIdsGroupedByType[fleetType][i])).CountDocuments() == 0)
+                {
+                    fleetListId.Remove(fleetIdsGroupedByType[fleetType][i]);
+                    fleetIdsGroupedByType[fleetType].RemoveAt(i);
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                }
+                else
+                {
+                    var fleet = MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, fleetIdsGroupedByType[fleetType][i])).First();
+                    var fleetTemplate = MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.name, fleetTemplates[fleetType].fleetName)).First();
+                    var basePosition = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.id, mainBaseId)).First().position;
+                    if (fleet.power < fleetTemplate.power * Values.fleetDepletionThreshold && (fleetType == AIFleetTypes.deliveryFleet || DateTime.Now.CompareTo(lastFleetReplenishTime.AddSeconds(Values.fleetsReplenishCooldown)) > 0)
+                        && fleet.status != FleetStatusConstant.MOVING && fleet.status != FleetStatusConstant.FIGHTING && fleet.status != FleetStatusConstant.TRANSITING
+                        && basePosition.Equals(fleet.position))
+                    {
+                        replenishFleet(fleet, fleetTemplate, fleetType);
+                        lastFleetReplenishTime = DateTime.Now;
+                    }
+                    //Si la flotte n'est pas sur la base et en patrouille, on la ramène à la base
+                    if (fleet.status == FleetStatusConstant.PATROLLING && !basePosition.Equals(fleet.position))
+                    {
+                        var evnt = MoveManager.GetInstance().launchMove(fleet, basePosition, fleet.position, FleetObjectives.MOVE, string.Format("{0} returns to base", fleet.name), 0);
+                        Utilies.WriteEventCreationLog("MoveEvent", evnt.id, this);
+                    }
+                }
+            }
+            if (fleetIdsGroupedByType[fleetType].Count < fleetTemplates[fleetType].maxFleetNumber)
+            {
+                if (fleetType == AIFleetTypes.deliveryFleet)
+                {
+                    createFleet(fleetTemplates[fleetType].fleetName, fleetType);
+                }
+                else if (DateTime.Now.CompareTo(lastFleetBuildTime.AddSeconds(Values.fleetsBuildCooldown)) > 0)
+                {
+                    createFleet(fleetTemplates[fleetType].fleetName, fleetType);
+                    lastFleetBuildTime = DateTime.Now;
+                }
+            }
+        }
+
+        private void updateFleets()
+        {
+            updateFleetsSquadrons(AIFleetTypes.defenseFleet);
+            updateFleetsSquadrons(AIFleetTypes.attackFleet);
+            updateFleetsSquadrons(AIFleetTypes.deliveryFleet);
+            updateFleetsSquadrons(AIFleetTypes.turretFleet);
+
+            var updateFleetsFuel = Builders<Fleet>.Update.Set(x => x.consumption, 1).Set(x => x.currentFuel, 1000000).Set(x => x.cumulatedFuelTank, 1000000).
+                Set(x => x.fuelTime, 1000000);
+            MongoDBSingleton.Instance().fleetsCollection.UpdateMany(Builders<Fleet>.Filter.Eq(x => x.ownerId, id), updateFleetsFuel);
+
+            for (int i = splitFleets.Count - 1; i >= 0; i--)
+            {
+                var tuple = splitFleets.ElementAt(i);
+                if (MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, tuple.Value)).CountDocuments() == 0)
+                {
+                    splitFleets.Remove(tuple.Key);
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.splitFleets, splitFleets);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.splitFleets, splitFleets);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                }
+                else if (MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, tuple.Key)).CountDocuments() == 0)
+                {
+                    fleetIdsGroupedByType[AIFleetTypes.attackFleet].Add(splitFleets[tuple.Key]);
+                    splitFleets.Remove(tuple.Key);
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.splitFleets, splitFleets).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.splitFleets, splitFleets).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                }
+            }
+            //Mise à jour du statut des flottes dans le cas des IAs non Warmonger
+            if (personality != Warmonger)
+            {
+                var position = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.ownerId, id)).First().position;
+
+
+                var fleetsCollection = MongoDBSingleton.Instance().database.GetCollection<Fleet>("fleets");
+                var fleetsFilter = Builders<Fleet>.Filter.Eq(x => x.ownerId, id);
+                var fleets = fleetsCollection.Find(fleetsFilter).ToList();
+
+                for (int i = 0; i < fleets.Count - 1; i++)
+                {
+                    if ((fleets[i].status == FleetStatusConstant.STANDBY || fleets[i].status == FleetStatusConstant.PATROLLING) &&
+                        fleets[i].status != FleetStatusConstant.MOVING && fleets[i].status != FleetStatusConstant.FIGHTING && fleets[i].status != FleetStatusConstant.TRANSITING &&
+                        !fleetIdsGroupedByType[AIFleetTypes.turretFleet].Contains(fleets[i].id) && !fleetIdsGroupedByType[AIFleetTypes.defenseFleet].Contains(fleets[i].id) &&
+                        fleets[i].position.Equals(position))
+                    {
+                        fleets[i].status = FleetStatusConstant.STANDBY;
+                        var fleetUpdate = Builders<Fleet>.Update.Set(x => x.status, fleets[i].status);
+                        fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, fleets[i].id), fleetUpdate);
+                    }
+                }
+            }
+
+
+        }
+
+        private void TryLaunchAttackFleet(GlobalPosition currentPosition, Owner target, Random rand, IModel channel, IBasicProperties properties, bool helpingPlayer)
+        {
+            FleetMoveEvent? moveEvent = null;
+            Fleet? firstAvailableFleet = null;
+            for (int i = 0; i < fleetIdsGroupedByType[AIFleetTypes.attackFleet].Count; i++)
+            {
+                var fleetFilter = Builders<Fleet>.Filter.Eq(x => x.id, fleetIdsGroupedByType[AIFleetTypes.attackFleet][i]);
+                if (MongoDBSingleton.Instance().fleetsCollection.Find(fleetFilter).CountDocuments() == 0)
+                {
+                    //Vaut-il mieux mettre à jour fleetListId dans la BDD à chaque itération, ou bien faire une seule modification après la fin de 
+                    //la boucle ? Sachant que la liste contient 10 - 20 éléments, et que peu sont enlevés (donc peu de modifications)
+                    fleetListId.Remove(fleetIdsGroupedByType[AIFleetTypes.attackFleet][i]);
+                    fleetIdsGroupedByType[AIFleetTypes.attackFleet].Remove(fleetIdsGroupedByType[AIFleetTypes.attackFleet][i]);
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                }
+                else
+                {
+                    var fleet = MongoDBSingleton.Instance().fleetsCollection.Find(fleetFilter).First();
+                    if (fleet.status != FleetStatusConstant.MOVING && fleet.status != FleetStatusConstant.FIGHTING && fleet.status != FleetStatusConstant.TRANSITING)
+                    {
+                        firstAvailableFleet = fleet;
+                        break;
+                    }
+
+                }
+
+            }
+            if (firstAvailableFleet != null)
+            {
+                var baseKey = target.baseListId.Keys.ToList()[rand.Next(target.baseListId.Count)];
+                //var baseKey = target.baseListId.Keys.ToList()[0];
+                var baseToAttack = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.id, baseKey)).First();
+
+                var targetDefensePower = MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.ownerId, target.id) & Builders<Fleet>.Filter.Eq(x => x.position, baseToAttack.position)).ToList().Sum(x => x.power);
+                if (targetDefensePower <= firstAvailableFleet.power)
+                {
+                    float power = 5;
+                    var basesList = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.ownerId, target.id)).ToList();
+                    foreach (var b in basesList)
+                    {
+                        float f = b.id == target.mainBaseId ? 1 : 0.5f;
+                        foreach (var key in b.slots.Keys)
+                        {
+                            if (b.slots[key].built != null)
+                            {
+                                switch (b.slots[key].built.building.name)
+                                {
+                                    case "Chantier spatial":
+                                        power += f * b.slots[key].built.level;
+                                        break;
+                                    case "Plateforme de defense":
+                                        power += f * b.slots[key].built.level;
+                                        break;
+                                    case "HQ":
+                                        power += f * (int)Math.Ceiling(b.slots[key].built.level / (float)2);
+                                        break;
+                                    case "Laboratoire":
+                                        power += f * b.slots[key].built.level;
+                                        break;
+                                }
+                            }
+                        }
+                    }
+                    if (power > 100) power = 100;
+                    power *= .01f;
+                    var splitFleet = new Fleet(firstAvailableFleet);
+                    splitFleet.id = null;
+                    splitFleet.status = FleetStatusConstant.INACTIVE;
+                    MongoDBSingleton.Instance().fleetsCollection.InsertOne(splitFleet);
+
+                    firstAvailableFleet.power = 0;
+                    splitFleet.power = 0;
+                    firstAvailableFleet.amount = 0;
+                    splitFleet.amount = 0;
+                    foreach (var key in firstAvailableFleet.squadrons.Keys)
+                    {
+                        int shipTotal = firstAvailableFleet.squadrons[key].amount;
+                        firstAvailableFleet.squadrons[key].amount = (int)Math.Ceiling(power * firstAvailableFleet.squadrons[key].amount);
+                        firstAvailableFleet.squadrons[key].cumulatedPower = firstAvailableFleet.squadrons[key].amount * firstAvailableFleet.squadrons[key].power;
+                        shipTotal -= firstAvailableFleet.squadrons[key].amount;
+                        firstAvailableFleet.power += firstAvailableFleet.squadrons[key].cumulatedPower;
+                        firstAvailableFleet.amount += firstAvailableFleet.squadrons[key].amount;
+
+                        splitFleet.squadrons[key].amount = shipTotal;
+                        splitFleet.squadrons[key].cumulatedPower = splitFleet.squadrons[key].amount * splitFleet.squadrons[key].power;
+                        splitFleet.squadrons[key].fleetId = splitFleet.id;
+                        splitFleet.power += splitFleet.squadrons[key].cumulatedPower;
+                        splitFleet.amount += splitFleet.squadrons[key].amount;
+                    }
+                    var fleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons, firstAvailableFleet.squadrons).Set(x => x.power, firstAvailableFleet.power).Set(x => x.power, firstAvailableFleet.power).
+                                Set(x => x.amount, firstAvailableFleet.amount);
+                    MongoDBSingleton.Instance().fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, firstAvailableFleet.id), fleetUpdate);
+                    var splitFleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons, splitFleet.squadrons).Set(x => x.power, splitFleet.power).Set(x => x.power, splitFleet.power).
+                                Set(x => x.amount, splitFleet.amount);
+                    MongoDBSingleton.Instance().fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, splitFleet.id), splitFleetUpdate);
+
+                    splitFleets[firstAvailableFleet.id] = splitFleet.id;
+                    fleetListId.Add(splitFleet.id);
+
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.splitFleets, splitFleets).Set(x => x.fleetListId, fleetListId);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.splitFleets, splitFleets).Set(x => x.fleetListId, fleetListId);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                }
+                moveEvent = MoveManager.GetInstance().launchMove(firstAvailableFleet, baseToAttack.position, currentPosition, FleetObjectives.ATTACK, "AI " + name + " attacks", 0);
+                Utilies.WriteEventCreationLog("MoveEvent", moveEvent.id, this);
+                Utilies.SendEvent(moveEvent, channel, properties);
+            }
+
+
+            if (moveEvent != null && target.type == OwnerTypeConstant.PLAYER && !helpingPlayer)
+            {
+                //Augmentation de la réputation du joueur si l'IA l'attaque (= vengeance assouvie par l'IA)
+                playersDictionary[target.id][PlayerElement.LastAttackTime] = DateTime.Now;
+                playersDictionary[target.id][PlayerElement.AttackProbabilityBonus] = 0;
+                moveEvent = null;
+            }
+        }
+
+        private void TryLaunchDefendFleet(GlobalPosition currentPosition, string attackFleetId, Owner attacker, Owner defender, Base baseToDefend, IModel channel, IBasicProperties properties)
+        {
+            FleetMoveEvent? moveEvent = null;
+            Fleet? firstAvailableFleet = null;
+            for (int i = 0; i < fleetIdsGroupedByType[AIFleetTypes.attackFleet].Count; i++)
+            {
+                var fleetFilter = Builders<Fleet>.Filter.Eq(x => x.id, fleetIdsGroupedByType[AIFleetTypes.attackFleet][i]);
+                if (MongoDBSingleton.Instance().fleetsCollection.Find(fleetFilter).CountDocuments() == 0)
+                {
+                    //Vaut-il mieux mettre à jour fleetListId dans la BDD à chaque itération, ou bien faire une seule modification après la fin de 
+                    //la boucle ? Sachant que la liste contient 10 - 20 éléments, et que peu sont enlevés (donc peu de modifications)
+                    fleetListId.Remove(fleetIdsGroupedByType[AIFleetTypes.attackFleet][i]);
+                    fleetIdsGroupedByType[AIFleetTypes.attackFleet].Remove(fleetIdsGroupedByType[AIFleetTypes.attackFleet][i]);
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.fleetListId, fleetListId).Set(x => x.fleetIdsGroupedByType, fleetIdsGroupedByType);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                }
+                else
+                {
+                    var fleet = MongoDBSingleton.Instance().fleetsCollection.Find(fleetFilter).First();
+                    if (fleet.status != FleetStatusConstant.MOVING && fleet.status != FleetStatusConstant.FIGHTING && fleet.status != FleetStatusConstant.TRANSITING)
+                    {
+                        firstAvailableFleet = fleet;
+                        break;
+                    }
+
+                }
+
+            }
+            if (firstAvailableFleet != null)
+            {
+                //Voir comment modifie puissance flotte IA selon la puissance de la flotte attaquante !
+                var attackFleet = MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, attackFleetId)).First();
+                if (firstAvailableFleet.power < attackFleet.power)
+                {
+                    float power = 10;
+                    //Calcul du pourcentage de la flotte à envoyer = proportionnel à la différence de puissance entre attaque et défense
+                    //=> Si l'attaque est bien plus forte que la défense, on enverra plus de vaisseaux, et inversement
+                    var attackerBasesList = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.ownerId, attacker.id)).ToList();
+                    foreach (var b in attackerBasesList)
+                    {
+                        float f = b.id == attacker.mainBaseId ? 1 : 0.5f;
+                        foreach (var key in b.slots.Keys)
+                        {
+                            if (b.slots[key].built != null)
+                            {
+                                switch (b.slots[key].built.building.name)
+                                {
+                                    case "Chantier spatial":
+                                        power += f * 3 * b.slots[key].built.level;
+                                        break;
+                                    case "HQ":
+                                        power += f * (int)Math.Ceiling(b.slots[key].built.level / (float)2);
+                                        break;
+                                }
+                            }
+                        }
+                    }
+                    var defenderBaseList = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.ownerId, defender.id)).ToList();
+                    foreach (var b in defenderBaseList)
+                    {
+                        float f = b.id == defender.mainBaseId ? 1 : 0.5f;
+                        foreach (var key in b.slots.Keys)
+                        {
+                            if (b.slots[key].built != null)
+                            {
+                                switch (b.slots[key].built.building.name)
+                                {
+                                    case "Chantier spatial":
+                                        power -= f * 2 * b.slots[key].built.level;
+                                        break;
+                                    case "HQ":
+                                        power -= f * (int)Math.Ceiling(b.slots[key].built.level / (float)2);
+                                        break;
+                                    case "Laboratoire":
+                                        power += f * b.slots[key].built.level;
+                                        break;
+                                }
+                            }
+                        }
+                    }
+                    power = Math.Min(Math.Max(5, power), 100);
+                    power *= .01f;
+                    switch (power)
+                    {
+                        case <= 200:
+                            power *= 4;
+                            break;
+                        case <= 12000:
+                            power *= 2;
+                            break;
+                        case <= 100000:
+                            power *= 1;
+                            break;
+                        default:
+                            power *= 0.5f;
+                            break;
+                    }
+                    var splitFleet = new Fleet(firstAvailableFleet);
+                    splitFleet.id = null;
+                    splitFleet.status = FleetStatusConstant.STANDBY;
+                    MongoDBSingleton.Instance().fleetsCollection.InsertOne(splitFleet);
+
+                    firstAvailableFleet.power = 0;
+                    splitFleet.power = 0;
+                    firstAvailableFleet.amount = 0;
+                    splitFleet.amount = 0;
+                    for (int j = 0; j < firstAvailableFleet.squadrons.Count; j++)
+                    {
+                        var key = firstAvailableFleet.squadrons.Keys.ToList()[j];
+                        int shipTotal = firstAvailableFleet.squadrons[key].amount;
+                        firstAvailableFleet.squadrons[key].amount = (int)Math.Ceiling(power * firstAvailableFleet.squadrons[key].amount);
+                        firstAvailableFleet.squadrons[key].cumulatedPower = firstAvailableFleet.squadrons[key].amount * firstAvailableFleet.squadrons[key].power;
+                        shipTotal -= firstAvailableFleet.squadrons[key].amount;
+                        firstAvailableFleet.power += firstAvailableFleet.squadrons[key].cumulatedPower;
+                        firstAvailableFleet.amount += firstAvailableFleet.squadrons[key].amount;
+
+                        key = splitFleet.squadrons.Keys.ToList()[j];
+                        splitFleet.squadrons[key].amount = shipTotal;
+                        splitFleet.squadrons[key].cumulatedPower = splitFleet.squadrons[key].amount * splitFleet.squadrons[key].power;
+                        splitFleet.squadrons[key].fleetId = splitFleet.id;
+                        splitFleet.power += splitFleet.squadrons[key].cumulatedPower;
+                        splitFleet.amount += splitFleet.squadrons[key].amount;
+                    }
+                    var fleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons, firstAvailableFleet.squadrons).Set(x => x.power, firstAvailableFleet.power).Set(x => x.power, firstAvailableFleet.power).
+                                Set(x => x.amount, firstAvailableFleet.amount);
+                    MongoDBSingleton.Instance().fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, firstAvailableFleet.id), fleetUpdate);
+                    var splitFleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons, splitFleet.squadrons).Set(x => x.power, splitFleet.power).Set(x => x.power, splitFleet.power).
+                                Set(x => x.amount, splitFleet.amount);
+                    MongoDBSingleton.Instance().fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, splitFleet.id), splitFleetUpdate);
+
+                    splitFleets[firstAvailableFleet.id] = splitFleet.id;
+                    fleetListId.Add(splitFleet.id);
+
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.splitFleets, splitFleets).Set(x => x.fleetListId, fleetListId);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.splitFleets, splitFleets).Set(x => x.fleetListId, fleetListId);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                }
+                moveEvent = MoveManager.GetInstance().launchMove(firstAvailableFleet, baseToDefend.position, currentPosition, FleetObjectives.DEFEND, string.Format("AI {0} defends player {1}", name, baseToDefend.ownerName), 0);
+                Utilies.WriteEventCreationLog("MoveEvent", moveEvent.id, this);
+                Utilies.SendEvent(moveEvent, channel, properties);
+            }
+
+        }
+
+        private void ManageMoveEventResult(EventResult eventResult)
+        {
+            if (eventResult.impactedOwnerId == id)
+            {
+                if (MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId)).CountDocuments() > 0 && !MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId)).First().reputationValues.ContainsKey(id))
+                {
+                    var repValueUpdate = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                    MongoDBSingleton.Instance().reputationCollection.UpdateOne(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId), repValueUpdate);
+                }
+            }
+            else if (MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId)).CountDocuments() > 0 &&
+                !MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId)).First().reputationValues.ContainsKey(id))
+            {
+                //Si la source de l'Event est un joueur et qu'il interagit avec un allié ou un ennemi de l'IA, on lui donne une réputation avec l'IA
+                if (allyIds.Contains(eventResult.impactedOwnerId) || enemyIds.Contains(eventResult.impactedOwnerId))
+                {
+                    var repValueUpdate = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                    MongoDBSingleton.Instance().reputationCollection.UpdateOne(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId), repValueUpdate);
+                }
+                else
+                {
+                    return;
+                }
+            }
+            else if (MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.impactedOwnerId)).CountDocuments() > 0 &&
+                !MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.impactedOwnerId)).First().reputationValues.ContainsKey(id))
+            {
+                //Si un allié ou un ennemi de l'IA interagit avec un joueur, alors on lui donne une réputation avec l'IA
+                if (allyIds.Contains(eventResult.userId) || enemyIds.Contains(eventResult.userId))
+                {
+                    var repValueUpdate = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                    MongoDBSingleton.Instance().reputationCollection.UpdateOne(Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.impactedOwnerId), repValueUpdate);
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            if (eventResult.userId == id)
+            {
+                var fleetId = ((JsonElement)eventResult.results[EventResultTypeConstants.MOVED_FLEET]).GetString();
+                var basePosition = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.id, mainBaseId)).First().position;
+                if (basePosition.Equals(eventResult.globalPosition) && splitFleets.ContainsKey(fleetId))
+                {
+                    var fleet = MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, fleetId)).First();
+                    var splitFleet = MongoDBSingleton.Instance().fleetsCollection.Find(Builders<Fleet>.Filter.Eq(x => x.id, splitFleets[fleetId])).First();
+                    fleet.power = 0;
+                    fleet.amount = 0;
+                    foreach (var key in fleet.squadrons.Keys)
+                    {
+                        fleet.squadrons[key].amount += splitFleet.squadrons[key].amount;
+                        fleet.squadrons[key].cumulatedPower += splitFleet.squadrons[key].cumulatedPower;
+                        fleet.power += fleet.squadrons[key].cumulatedPower;
+                        fleet.amount += fleet.squadrons[key].amount;
+                    }
+                    var fleetUpdate = Builders<Fleet>.Update.Set(x => x.squadrons, fleet.squadrons).Set(x => x.power, fleet.power).
+                        Set(x => x.amount, fleet.amount);
+                    MongoDBSingleton.Instance().fleetsCollection.UpdateOne(Builders<Fleet>.Filter.Eq(x => x.id, fleet.id), fleetUpdate);
+
+                    splitFleets.Remove(fleetId);
+                    if (type == OwnerTypeConstant.AI_DELTA)
+                    {
+                        var updateOwnerFleets = Builders<AIDelta>.Update.Set(x => x.splitFleets, splitFleets);
+                        MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+
+                    }
+                    else
+                    {
+                        var updateOwnerFleets = Builders<AIGamma>.Update.Set(x => x.splitFleets, splitFleets);
+                        MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), updateOwnerFleets);
+                    }
+                    MongoDBSingleton.Instance().fleetsCollection.DeleteOne(Builders<Fleet>.Filter.Eq(x => x.id, splitFleet.id));
+                }
+
+            }
+            var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId);
+            if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0)
+                return;
+            var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+            var newReputation = oldReputation;
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.ATTACK) && ((JsonElement)eventResult.results[EventResultTypeConstants.ATTACK]).GetBoolean())
+            {
+                //ManageAttackEvent(rand, channel, properties, eventResult);
+            }
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.SUPPORT) && ((JsonElement)eventResult.results[EventResultTypeConstants.SUPPORT]).GetBoolean())
+            {
+                ManageSupportEventResult(eventResult, oldReputation, newReputation);
+            }
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.BUILD_BASE) && ((JsonElement)eventResult.results[EventResultTypeConstants.BUILD_BASE]).GetBoolean())
+            {
+                //Perte réputation si construit base proche IA belliciste ?
+            }
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.ESCAPE) && ((JsonElement)eventResult.results[EventResultTypeConstants.ESCAPE]).GetBoolean())
+            {
+                //Fuite d'un combat -> prend-on en compte ce cas pour l'IA ?
+            }
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.CANCELED_BASE_CONSTRUCT) && ((JsonElement)eventResult.results[EventResultTypeConstants.CANCELED_BASE_CONSTRUCT]).GetBoolean())
+            {
+                //Traite-t on ce cas ?
+            }
+            //else if (eventResult.results.ContainsKey(EventResultTypeConstants.DELIVERED_RESOURCES) && ((Dictionary<string, int>)(eventResult.results[EventResultTypeConstants.DELIVERED_RESOURCES])).Count > 0)
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.DELIVERED_RESOURCES) && (((JsonElement)eventResult.results[EventResultTypeConstants.DELIVERED_RESOURCES]).Deserialize<Dictionary<string, int>>()).Count > 0)
+            {
+                ManageDeliveredResourcesEventResult(eventResult, oldReputation, newReputation);
+            }
+        }
+
+        private void ManageFightEventResult(EventResult eventResult, Random rand, IModel channel, IBasicProperties properties)
+        {
+            List<string> defenders = new List<string>();
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.DEFENDERS_ID))
+                defenders = ((JsonElement)eventResult.results[EventResultTypeConstants.DEFENDERS_ID]).Deserialize<List<string>>();
+
+            if (!defenders.Contains(eventResult.userId))
+                return;
+
+            // Décommenter les lignes utiles selon les besoins (actuellement commentées pour éviter des calculs inutiles)
+
+            //Dictionary<string, int>? pilledResources = ((JsonElement)eventResult.results[EventResultTypeConstants.PILLED_RESOURCES]).Deserialize<Dictionary<string, int>>();
+            //Dictionary<string, int>? lostResources = ((JsonElement)eventResult.results[EventResultTypeConstants.LOST_RESOURCES]).Deserialize<Dictionary<string, int>>();
+            //Dictionary<string, int>? destroyedShip = ((JsonElement)eventResult.results[EventResultTypeConstants.DESTROYED_SHIP]).Deserialize<Dictionary<string, int>>();
+            //destroyedPower
+            //Dictionary<string, int>? lostShip = ((JsonElement)eventResult.results[EventResultTypeConstants.LOST_SHIP]).Deserialize<Dictionary<string, int>>();
+            //lostPower
+            //Dictionary<string, int>? bombedShip = ((JsonElement)eventResult.results[EventResultTypeConstants.BOMBED_SHIP]).Deserialize<Dictionary<string, int>>();
+            //string destroyedBase = ((JsonElement)eventResult.results[EventResultTypeConstants.DESTROYED_BASE]).GetString();
+            //string capturedBase = ((JsonElement)eventResult.results[EventResultTypeConstants.CAPTURED_BASE]).GetString();
+
+            List<string> attackers = new List<string>();
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.ATTACKERS_ID))
+                attackers = ((JsonElement)eventResult.results[EventResultTypeConstants.ATTACKERS_ID]).Deserialize<List<string>>();
+
+            if (personality == Personality.Warmonger)
+            {
+                foreach (string enemy in attackers)
+                {
+                    var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, enemy);
+                    if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0 || !MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                        continue;
+                    var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    updateOrSetPlayerReputation(enemy, oldReputation, Math.Min(oldReputation + Values.warmongerCombatReputationOffset, Values.neutralThresholdFactor * Values.maxReputation));
+                }
+            }
+            else if (personality == Personality.Pacifist)
+            {
+                foreach (string enemy in attackers)
+                {
+                    var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, enemy);
+                    if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0 || !MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                        continue;
+                    var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    updateOrSetPlayerReputation(enemy, oldReputation, oldReputation - Values.warmongerCombatReputationOffset);
+                }
+            }
+
+            if (id.Equals(eventResult.userId))
+            {
+                //Perte de réputation pour tout les ennemis (l'IA a été attaquée)
+                foreach (string enemy in attackers)
+                {
+                    var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, enemy);
+                    if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0)
+                        continue;
+                    if (!MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                    {
+                        var update = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                        MongoDBSingleton.Instance().reputationCollection.UpdateOne(filter, update);
+                    }
+                    var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    var newReputation = oldReputation - ReputationModificationOnAttack(eventResult);
+                    updateOrSetPlayerReputation(enemy, oldReputation, newReputation);
+                }
+            }
+            else if (allyIds.Contains(eventResult.userId))
+            {
+                //Perte de réputation plus faible
+                foreach (string enemy in attackers)
+                {
+                    var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, enemy);
+                    if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0)
+                        continue;
+                    if (!MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                    {
+                        var update = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                        MongoDBSingleton.Instance().reputationCollection.UpdateOne(filter, update);
+                    }
+                    var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    var newReputation = oldReputation - ReputationModificationOnAttack(eventResult) * Values.allyRepLoseFactor;
+                    updateOrSetPlayerReputation(enemy, oldReputation, newReputation);
+                }
+            }
+            else if (enemyIds.Contains(eventResult.userId))
+            {
+                //Gain de réputation plus faible
+                foreach (string enemy in attackers)
+                {
+                    var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, enemy);
+                    if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0)
+                        continue;
+                    if (!MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                    {
+                        var update = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                        MongoDBSingleton.Instance().reputationCollection.UpdateOne(filter, update);
+                    }
+                    var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    var newReputation = oldReputation + ReputationModificationOnAttack(eventResult) * Values.enemyRepWinFactor;
+                    updateOrSetPlayerReputation(enemy, oldReputation, newReputation);
+                }
+            }
+
+            if (attackers.Contains(id))
+            {
+                var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId);
+                if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() != 0)
+                {
+                    if (!MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                    {
+                        var update = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                        MongoDBSingleton.Instance().reputationCollection.UpdateOne(filter, update);
+                    }
+                    var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    var newReputation = oldReputation + ReputationModificationOnAttack(eventResult);
+                    updateOrSetPlayerReputation(eventResult.userId, oldReputation, Math.Min(newReputation, Values.neutralThresholdFactor * Values.maxReputation));
+                }
+            }
+
+            string playerId = eventResult.userId;
+            var repFilter = Builders<ReputationObject>.Filter.Eq(x => x.id, playerId);
+            if (MongoDBSingleton.Instance().reputationCollection.Find(repFilter).CountDocuments() == 0 || !MongoDBSingleton.Instance().reputationCollection.Find(repFilter).First().reputationValues.ContainsKey(id))
+            {
+                return;
+            }
+            float reputation = MongoDBSingleton.Instance().reputationCollection.Find(repFilter).First().reputationValues[id];
+
+
+            if (!playersDictionary.ContainsKey(playerId) && (Utilies.getReputationRatio(reputation) >= Values.neutralThresholdFactor || Utilies.getReputationRatio(reputation) <= Values.hostileThresholdFactor))
+            {
+                playersDictionary.Add(playerId, new Dictionary<PlayerElement, object>());
+                playersDictionary[playerId].Add(PlayerElement.LastAttackTime, DateTime.MinValue);
+                playersDictionary[playerId].Add(PlayerElement.AttackProbabilityBonus, 0);
+                playersDictionary[playerId].Add(PlayerElement.GiftProbabilityBonus, 0);
+                playersDictionary[playerId].Add(PlayerElement.QuestProbabilityBonus, 0);
+            }
+
+            var mainBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.id, mainBaseId)).First();
+            ChooseAndExecuteAction(rand, playerId, channel, properties, reputation, mainBase);
+        }
+
+        private void ManageQuestEventResult(EventResult eventResult)
+        {
+            var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId);
+            if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0)
+                return;
+            var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+            var newReputation = oldReputation;
+
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.QUEST_STATUS))
+                AnalyseQuestEvent(eventResult, oldReputation, newReputation);
+        }
+
+        private void ManageNewUserEventResult(EventResult eventResult)
+        {
+            var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, eventResult.userId);
+            if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() == 0)
+                return;
+            //var oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+            //var newReputation = oldReputation;
+
+            var player = eventResult.userId;
+            if (playersDictionary.ContainsKey(player))
+                return;
+            TryAddPlayerToConsideredPlayers(player);
+        }
+
+        private float ReputationModificationOnAttack(EventResult eventResult)
+        {
+            float percentageLostPower = 0;
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.LOST_POWER))
+            {
+                percentageLostPower = ((JsonElement)eventResult.results[EventResultTypeConstants.LOST_POWER]).GetInt32();
+            }
+            percentageLostPower /= ((float)(maxPowerDefenseFleet + maxPowerTurretFleet));
+
+            Dictionary<string, int> lostResources = new Dictionary<string, int>();
+            if (eventResult.results.ContainsKey(EventResultTypeConstants.LOST_RESOURCES))
+                lostResources = ((JsonElement)eventResult.results[EventResultTypeConstants.LOST_RESOURCES]).Deserialize<Dictionary<string, int>>();
+            float percentageLostResources = 0f;
+            foreach (KeyValuePair<string, int> keyValuePair in lostResources)
+            {
+                percentageLostResources += (float)keyValuePair.Value / (float)storageCapacities[keyValuePair.Key];
+            }
+            if (lostResources.Count > 0) percentageLostResources /= lostResources.Count;
+
+            return Values.constantattackReputationLoss +
+                Values.variableAttackReputationLoss *
+                (Math.Min(1,
+                percentageLostPower) +
+                Math.Min(1,
+                percentageLostResources)) / 2;
+        }
+
+        private void ManageSupportEventResult(EventResult? eventResult, float oldReputation, float newReputation)
+        {
+            if (id.Equals(eventResult.impactedOwnerId))
+            {
+                //Gain de réputation (le joueur vient aider l'IA)
+                newReputation = Math.Min(Values.maxReputation,
+                    newReputation + Values.helpReputationGain);
+
+            }
+            else if (allyIds.Contains(eventResult.impactedOwnerId))
+            {
+                //Augmentation de réputation (aide allié)
+                newReputation = Math.Min(Values.maxReputation,
+                    newReputation + Values.helpReputationGain * Values.allyHelpReputationFactor);
+            }
+            else if (enemyIds.Contains(eventResult.impactedOwnerId))
+            {
+                //perte de réputation (aide ennemi)
+                newReputation = Math.Max(Values.minReputation,
+                    newReputation - Values.helpReputationGain * Values.enemyHelpReputationFactor);
+            }
+            updateOrSetPlayerReputation(eventResult.userId, oldReputation, newReputation);
+        }
+
+        private void ManageDeliveredResourcesEventResult(EventResult? eventResult, float oldReputation, float newReputation)
+        {
+            if (eventResult.userId.Equals(eventResult.impactedOwnerId))
+                return;
+
+            var baseFilter = Builders<Base>.Filter.Eq(x => x.id, mainBaseId);
+            var mainBase = MongoDBSingleton.Instance().basesCollection.Find(baseFilter).First();
+
+            float multiplicator = 1f;
+
+            if (personality == Personality.Trader)
+                multiplicator = Values.traderTradeReputationMultiplicator;
+
+            if (!eventResult.results.ContainsKey(EventResultTypeConstants.DELIVERED_RESOURCES))
+                return;
+
+            var resourcesEvent = ((JsonElement)eventResult.results[EventResultTypeConstants.DELIVERED_RESOURCES]).Deserialize<Dictionary<string, int>>();
+
+            if (id.Equals(eventResult.impactedOwnerId))
+            {
+                //Gain de réputation (le joueur vient donner des ressources à l'IA)
+                newReputation = Math.Min(Values.maxReputation,
+                    newReputation + ReputationGainOnDelivery(mainBase.ressources, resourcesEvent) * multiplicator);
+
+            }
+            else if (allyIds.Contains(eventResult.impactedOwnerId))
+            {
+                //Augmentation de réputation (donne des ressources à un allié)
+                newReputation = Math.Min(Values.maxReputation,
+                    newReputation + ReputationGainOnDelivery(mainBase.ressources, resourcesEvent) * Values.allyResourcesDeliveryReputationFactor * multiplicator);
+            }
+            else if (enemyIds.Contains(eventResult.impactedOwnerId))
+            {
+                //perte de réputation (donne des ressources à un ennemi)
+                newReputation = Math.Max(Values.minReputation,
+                    newReputation - ReputationGainOnDelivery(mainBase.ressources, resourcesEvent) * Values.enemyResourcesDeliveryReputationFactor * multiplicator);
+            }
+            updateOrSetPlayerReputation(eventResult.userId, oldReputation, newReputation);
+        }
+
+        private float ReputationGainOnDelivery(Dictionary<string, RessourceCumul> resourcesBase, Dictionary<string, int>? resourcesEvent)
+        {
+            if (resourcesEvent == null)
+                return 0f;
+            float reputationTotalGain = 0f;
+
+            foreach (KeyValuePair<string, int> eventKVP in resourcesEvent)
+            {
+                float vf = resourcesBase[eventKVP.Key].amount;
+                float amountGiven = eventKVP.Value;
+                float vs = resourcesBase[eventKVP.Key].storage;
+                float reputationResourceGain = (Values.maxReputation - Values.minReputation) * Values.resourcesDeliveryFactor * amountGiven / (vs + vf);
+                reputationTotalGain += reputationResourceGain;
+            }
+
+            return reputationTotalGain;
+        }
+
+        private void AnalyseQuestEvent(EventResult eventResult, float oldReputation, float newReputation)
+        {
+            if (!id.Equals(eventResult.impactedOwnerId))
+                return;
+            if (((JsonElement)eventResult.results[EventResultTypeConstants.QUEST_STATUS]).GetString() == FinishedQuestStatusConstant.SUCCESS)
+            {
+                this.QuestSuccessed(eventResult, oldReputation, newReputation);
+            }
+            else if (((JsonElement)eventResult.results[EventResultTypeConstants.QUEST_STATUS]).GetString() == FinishedQuestStatusConstant.REJECTED)
+            {
+                this.QuestRejected(eventResult, oldReputation, newReputation);
+            }
+            else if (((JsonElement)eventResult.results[EventResultTypeConstants.QUEST_STATUS]).GetString() == FinishedQuestStatusConstant.FAILURE)
+            {
+                this.QuestFailed(eventResult, oldReputation, newReputation);
+            }
+            else if (((JsonElement)eventResult.results[EventResultTypeConstants.QUEST_STATUS]).GetString() == FinishedQuestStatusConstant.EXPIRED)
+            {
+                this.QuestExpired(eventResult, oldReputation, newReputation);
+            }
+        }
+
+        private void QuestSuccessed(EventResult eventResult, float oldReputation, float newReputation)
+        {
+            //Inutile => on donne dans les quêtes une récompense de réputation, on délègue donc l'augmentation de réputation pour le succès de la quête au module de quête
+            //newReputation = Math.Min(Values.maxReputation,
+            //    newReputation + 30 +Values.questSuccessedReputationGain);
+            //updateOrSetPlayerReputation(eventResult.userId, oldReputation, newReputation);
+        }
+
+        private void QuestRejected(EventResult eventResult, float oldReputation, float newReputation)
+        {
+            if (Utilies.getPlayerReputationStatus(oldReputation) == ReputationStatus.Ally)
+            {
+                newReputation = Math.Max(Values.minReputation,
+                newReputation - Values.questRejectedReputationLoss);
+                updateOrSetPlayerReputation(eventResult.userId, oldReputation, newReputation);
+            }
+        }
+
+        private void QuestFailed(EventResult eventResult, float oldReputation, float newReputation)
+        {
+            newReputation = Math.Max(Values.minReputation,
+                newReputation - Values.questFailedReputationLoss);
+            updateOrSetPlayerReputation(eventResult.userId, oldReputation, newReputation);
+        }
+
+        private void QuestExpired(EventResult eventResult, float oldReputation, float newReputation)
+        {
+            if (Utilies.getPlayerReputationStatus(oldReputation) == ReputationStatus.Ally || Utilies.getPlayerReputationStatus(oldReputation) == ReputationStatus.Friendly)
+            {
+                newReputation = Math.Max(Values.minReputation,
+                newReputation - Values.questExpiredReputationLoss);
+                updateOrSetPlayerReputation(eventResult.userId, oldReputation, newReputation);
+            }
+        }
+
+        //Updates or sets the reputation of a player for the AI in the database
+        public void updateOrSetPlayerReputation(string playerId, float oldReputation, float newReputation)
+        {
+            int retry = 0;
+            float delta = newReputation - oldReputation;
+            var repFilter = Builders<ReputationObject>.Filter.Eq(x => x.id, playerId);
+            oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(repFilter).First().reputationValues[id];
+            var updateReputation = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], Math.Min(Math.Max(oldReputation + delta, Values.minReputation), Values.maxReputation));
+            while (retry < 10)
+            {
+                try
+                {
+                    MongoDBSingleton.Instance().reputationCollection.UpdateOne(repFilter, updateReputation);
+                    break;
+
+                }
+                catch (Exception e)
+                {
+                    oldReputation = MongoDBSingleton.Instance().reputationCollection.Find(repFilter).First().reputationValues[id];
+                    updateReputation = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], Math.Min(Math.Max(oldReputation + delta, Values.minReputation), Values.maxReputation));
+                    retry++;
+                }
+            }
+
+            // Supprime le joueur du dictonnaire pour le rajouter seulement si besoin est (plus simple à gérer)
+            bool wasInPlayersDictionary = playersDictionary.TryGetValue(playerId, out var players);
+            if (wasInPlayersDictionary)
+                playersDictionary.Remove(playerId);
+            var aiBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.ownerId, id)).First();
+            var baseFilter = Builders<Base>.Filter.Eq(x => x.ownerId, playerId);
+            var playerBases = MongoDBSingleton.Instance().basesCollection.Find(baseFilter).ToList();
+            foreach (var b in playerBases)
+            {
+                if (CommonToolService.distance(aiBase.position, b.position) < Values.interactionRadius)
+                {
+                    if (wasInPlayersDictionary)
+                        playersDictionary.Add(playerId, players);
+                    else
+                    {
+                        playersDictionary.Add(playerId, new Dictionary<PlayerElement, object>());
+                        playersDictionary[playerId].Add(PlayerElement.LastAttackTime, DateTime.MinValue);
+                        playersDictionary[playerId].Add(PlayerElement.AttackProbabilityBonus, 0);
+                        playersDictionary[playerId].Add(PlayerElement.GiftProbabilityBonus, 0);
+                        playersDictionary[playerId].Add(PlayerElement.QuestProbabilityBonus, 0);
+                    }
+                    break;
+                }
+            }
+            float rep = MongoDBSingleton.Instance().reputationCollection.Find(repFilter).First().reputationValues[id];
+            if (!playersDictionary.ContainsKey(playerId))
+            {
+                if (Utilies.getReputationRatio(rep) >= Values.neutralThresholdFactor || Utilies.getReputationRatio(rep) <= Values.hostileThresholdFactor)
+                {
+                    if (wasInPlayersDictionary)
+                        playersDictionary.Add(playerId, players);
+                    else
+                    {
+                        playersDictionary.Add(playerId, new Dictionary<PlayerElement, object>());
+                        playersDictionary[playerId].Add(PlayerElement.LastAttackTime, DateTime.MinValue);
+                        playersDictionary[playerId].Add(PlayerElement.AttackProbabilityBonus, 0);
+                        playersDictionary[playerId].Add(PlayerElement.GiftProbabilityBonus, 0);
+                        playersDictionary[playerId].Add(PlayerElement.QuestProbabilityBonus, 0);
+                    }
+                }
+            }
+
+            UpdateAlliesEnemies(playerId, rep);
+        }
+
+        private void UpdateAlliesEnemies(string playerId, float reputation)
+        {
+            var playerFilter = Builders<User>.Filter.Eq(x => x.id, playerId);
+            var owner = MongoDBSingleton.Instance().usersCollection.Find(playerFilter).First();
+
+            if (Utilies.getPlayerReputationStatus(reputation) == ReputationStatus.War)
+            {
+                if (!enemyIds.Contains(playerId))
+                    enemyIds.Add(playerId);
+                allyIds.Remove(playerId);
+                if (!owner.enemyIds.Contains(id))
+                    owner.enemyIds.Add(id);
+                owner.allyIds.Remove(id);
+
+            }
+            else if (Utilies.getPlayerReputationStatus(reputation) == ReputationStatus.Ally)
+            {
+                enemyIds.Remove(playerId);
+                if (!allyIds.Contains(playerId))
+                    allyIds.Add(playerId);
+                owner.enemyIds.Remove(id);
+                if (!owner.allyIds.Contains(id))
+                    owner.allyIds.Add(id);
+            }
+            else
+            {
+                enemyIds.Remove(playerId);
+                allyIds.Remove(playerId);
+                owner.enemyIds.Remove(id);
+                owner.allyIds.Remove(id);
+            }
+
+            //mise à jour du status du joueur en BDD
+            var playerUpdate = Builders<User>.Update.Set(x => x.enemyIds, owner.enemyIds).Set(x => x.allyIds, owner.allyIds);
+            MongoDBSingleton.Instance().usersCollection.UpdateOne(playerFilter, playerUpdate);
+
+            if (type == OwnerTypeConstant.AI_DELTA)
+            {
+                var aiUpdate = Builders<AIDelta>.Update.Set(x => x.allyIds, allyIds).Set(x => x.enemyIds, enemyIds);
+                MongoDBSingleton.Instance().aiDeltaCollection.UpdateOne(Builders<AIDelta>.Filter.Eq(x => x.id, id), aiUpdate);
+            }
+            else
+            {
+                var aiUpdate = Builders<AIGamma>.Update.Set(x => x.allyIds, allyIds).Set(x => x.enemyIds, enemyIds);
+                MongoDBSingleton.Instance().aiGammaCollection.UpdateOne(Builders<AIGamma>.Filter.Eq(x => x.id, id), aiUpdate);
+            }
+        }
+
+        private void TryAddPlayerToConsideredPlayers(string playerId)
+        {
+            var aiBase = MongoDBSingleton.Instance().basesCollection.Find(Builders<Base>.Filter.Eq(x => x.ownerId, id)).First();
+            var baseFilter = Builders<Base>.Filter.Eq(x => x.ownerId, playerId);
+            var playerBases = MongoDBSingleton.Instance().basesCollection.Find(baseFilter).ToList();
+            foreach (var b in playerBases)
+            {
+                if (CommonToolService.distance(aiBase.position, b.position) < Values.interactionRadius)
+                {
+                    //Si le joueur est dans le cercle de considération de l'IA, alors on lui attribue une réputation
+                    if (MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, playerId)).CountDocuments() > 0 && !MongoDBSingleton.Instance().reputationCollection.Find(Builders<ReputationObject>.Filter.Eq(x => x.id, playerId)).First().reputationValues.ContainsKey(id))
+                    {
+                        var playerUpdate = Builders<ReputationObject>.Update.Set(x => x.reputationValues[id], 500);
+                        MongoDBSingleton.Instance().reputationCollection.UpdateOne(Builders<ReputationObject>.Filter.Eq(x => x.id, playerId), playerUpdate);
+                    }
+                    playersDictionary.Add(playerId, new Dictionary<PlayerElement, object>());
+                    playersDictionary[playerId].Add(PlayerElement.LastAttackTime, DateTime.MinValue);
+                    playersDictionary[playerId].Add(PlayerElement.AttackProbabilityBonus, 0);
+                    playersDictionary[playerId].Add(PlayerElement.GiftProbabilityBonus, 0);
+                    playersDictionary[playerId].Add(PlayerElement.QuestProbabilityBonus, 0);
+                    break;
+                }
+            }
+            if (!playersDictionary.ContainsKey(playerId))
+            {
+                var filter = Builders<ReputationObject>.Filter.Eq(x => x.id, playerId);
+                if (MongoDBSingleton.Instance().reputationCollection.Find(filter).CountDocuments() > 0 && MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues.ContainsKey(id))
+                {
+                    float rep = MongoDBSingleton.Instance().reputationCollection.Find(filter).First().reputationValues[id];
+                    if (Utilies.getReputationRatio(rep) >= Values.neutralThresholdFactor || Utilies.getReputationRatio(rep) <= Values.hostileThresholdFactor)
+                    {
+                        playersDictionary.Add(playerId, new Dictionary<PlayerElement, object>());
+                        playersDictionary[playerId].Add(PlayerElement.LastAttackTime, DateTime.MinValue);
+                        playersDictionary[playerId].Add(PlayerElement.AttackProbabilityBonus, 0);
+                        playersDictionary[playerId].Add(PlayerElement.GiftProbabilityBonus, 0);
+                        playersDictionary[playerId].Add(PlayerElement.QuestProbabilityBonus, 0);
+                    }
+                }
+            }
+        }
+
+        private void AIBehaviorLoop(Random rand, IModel channel, IBasicProperties properties)
+        {
+            var now = DateTime.Now;
+            if (now.CompareTo(lastSleepTime.AddSeconds(Values.IAsleepTime)) < 0)
+            {
+                Thread.Sleep(lastSleepTime.AddSeconds(Values.IAsleepTime) - now);
+            }
+
+            var baseFilter = Builders<Base>.Filter.Eq(x => x.id, mainBaseId);
+            var mainBase = MongoDBSingleton.Instance().basesCollection.Find(baseFilter).First();
+            //Logique de décision de l'IA ici
+            foreach (var player in MongoDBSingleton.Instance().reputationCollection.AsQueryable().
+                Where(x => playersDictionary.Keys.Contains(x.id) && x.reputationValues.ContainsKey(id)).
+                Select(x => new Tuple<string, float>(x.id, x.reputationValues[id])))
+            {
+                try
+                {
+                    var reputation = new List<float> { player.Item2, player.Item2 };
+                    ChooseAndExecuteAction(rand, player.Item1, channel, properties, reputation[0], mainBase);
+                    reputation[1] = Values.baseReputation + (reputation[1] - Values.baseReputation) * Values.reputationDecay;
+                    updateOrSetPlayerReputation(player.Item1, reputation[0], reputation[1]);
+                }
+                catch (Exception e)
+                {
+                    Utilies.WriteErrorLog(e, this);
+                }
+            }
+            lastSleepTime = lastSleepTime.AddSeconds(Values.IAsleepTime);
+
+
+            //La base accumule des ressources
+            mainBase.accumulateRessources(Values.ressourceAccumulationPercentage);
+            var baseUpdate = Builders<Base>.Update.Set(x => x.ressources, mainBase.ressources);
+            MongoDBSingleton.Instance().basesCollection.UpdateOne(baseFilter, baseUpdate);
+        }
+    }
+}

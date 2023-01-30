@@ -1,0 +1,13 @@
+{
+  "mongodb": {
+    "uri": "mongodb://176.169.4.7:40002/?readPreference=primary&directConnection=true&ssl=false",
+    "database": "nan"
+  },
+  "rabbitmq": {
+    "HostName": "176.169.4.7",
+    "Port": 40000,
+    "UserName": "Game_Service",
+    "Password": "0012481248@@",
+    "VirtualHost": "needaname"
+  }
+}

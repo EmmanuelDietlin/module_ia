@@ -1,0 +1,4 @@
+var searchData=
+[
+  ['owner_0',['Owner',['../class_a_i_module_1_1_owners_1_1_owner.html#a800fcccc69cd8e03fde2ec6b3fb2e7a9',1,'AIModule.Owners.Owner.Owner()'],['../class_a_i_module_1_1_owners_1_1_owner.html#a1efccc1e9bddc0585e11baca58f083a3',1,'AIModule.Owners.Owner.Owner(string id, string name, string description, string mainBaseId, Dictionary&lt; string, string &gt; baseListId, List&lt; string &gt; fleetListId, List&lt; string &gt; agentListId, Dictionary&lt; string, int &gt; agentAmountPerType, int money, Dictionary&lt; string, int &gt; virtualResources, Dictionary&lt; string, int &gt; effects, Dictionary&lt; string, string &gt; effectSources, Dictionary&lt; string, int &gt; researchMap, string type, string diplomacyId, Dictionary&lt; string, DateTime &gt; pendingResearch, string imageLocation, long version)']]]
+];

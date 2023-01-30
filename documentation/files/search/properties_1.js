@@ -1,0 +1,23 @@
+var searchData=
+[
+  ['active_0',['active',['../class_a_i_module_1_1_bases_1_1_built.html#a25e3fda8e557ffa2cb8400002eb56b7d',1,'AIModule.Bases.Built.active()'],['../class_a_i_module_1_1_owners_1_1_user.html#adabd49cde0b2b112b9b2590e14612617',1,'AIModule.Owners.User.active()']]],
+  ['activesobjectives_1',['activesObjectives',['../class_a_i_module_1_1_quest_1_1_quest.html#a6d4f1f6e4da36aa3b8335f4e5efdec68',1,'AIModule::Quest::Quest']]],
+  ['agentamountpertype_2',['agentAmountPerType',['../class_a_i_module_1_1_owners_1_1_owner.html#aeb9d1f7759d2b54890847e59039947b6',1,'AIModule::Owners::Owner']]],
+  ['agentlistid_3',['agentListId',['../class_a_i_module_1_1_owners_1_1_owner.html#aaeb8265a20e17dc44746d790a9329f3a',1,'AIModule::Owners::Owner']]],
+  ['aibasepower_4',['aiBasePower',['../class_a_i_module_1_1_a_i_1_1_a_i.html#a0f660d2a6c763803cb07c4cf85e72636',1,'AIModule::AI::AI']]],
+  ['aideltacollection_5',['aiDeltaCollection',['../class_a_i_module_1_1_common_1_1_mongo_d_b_singleton.html#a84a5fe46bc397fa220813cc2430a66dc',1,'AIModule::Common::MongoDBSingleton']]],
+  ['aigammacollection_6',['aiGammaCollection',['../class_a_i_module_1_1_common_1_1_mongo_d_b_singleton.html#adaca1056c4fccc7655ddccf7dae801e0',1,'AIModule::Common::MongoDBSingleton']]],
+  ['aiquestsquantity_7',['aiQuestsQuantity',['../class_a_i_module_1_1_owners_1_1_user.html#ac23a7d0b77174c20ff0da9441ff4b642',1,'AIModule::Owners::User']]],
+  ['allianceid_8',['allianceId',['../class_a_i___init_1_1_a_i_config.html#a27e9493c7830c40b58ceeac9d72482c4',1,'AI_Init.AIConfig.allianceId()'],['../class_a_i_module_1_1_a_i_1_1_a_i.html#a518e417a6c5b142f888e1a1247b0f123',1,'AIModule.AI.AI.allianceId()'],['../class_a_i_module_1_1_owners_1_1_user.html#a9cd7fe47ee8f826820b79db05062d1fb',1,'AIModule.Owners.User.allianceId()']]],
+  ['alliancename_9',['allianceName',['../class_a_i___init_1_1_a_i_config.html#ab4b6f8e218596f130720940fae7884cd',1,'AI_Init.AIConfig.allianceName()'],['../class_a_i_module_1_1_a_i_1_1_a_i.html#a0bd2d0f5123539c2db3ab35132543c80',1,'AIModule.AI.AI.allianceName()'],['../class_a_i_module_1_1_owners_1_1_user.html#aab7fc32c41a4f86e57d5e4a11c31e430',1,'AIModule.Owners.User.allianceName()']]],
+  ['alliancescollection_10',['alliancesCollection',['../class_a_i_module_1_1_common_1_1_mongo_d_b_singleton.html#a73e79cbe1ed1df020febe72ae427e747',1,'AIModule::Common::MongoDBSingleton']]],
+  ['allyallianceids_11',['allyAllianceIds',['../class_a_i___init_1_1_a_i_config.html#af9b63a3da25da4c6854355e0e4a8d61f',1,'AI_Init.AIConfig.allyAllianceIds()'],['../class_a_i_module_1_1_a_i_1_1_a_i.html#aefa7c9f665cbef8bae6855948f6a89c1',1,'AIModule.AI.AI.allyAllianceIds()']]],
+  ['allyids_12',['allyIds',['../class_a_i_module_1_1_owners_1_1_owner.html#a660ed0d5656e47bbbe0c7318318cc402',1,'AIModule::Owners::Owner']]],
+  ['amount_13',['amount',['../class_a_i_module_1_1_bases_1_1_ressource_cumul.html#a22fef4fd331cd6cfb9734420230e663c',1,'AIModule.Bases.RessourceCumul.amount()'],['../class_a_i_module_1_1_fight_1_1_fleet.html#ad80f4fa9666bfeb11ca7bebf65ce386b',1,'AIModule.Fight.Fleet.amount()'],['../class_a_i_module_1_1_fight_1_1_squadron.html#a166cff4fd7654f1a59b37adc273f33e9',1,'AIModule.Fight.Squadron.amount()'],['../class_a_i_module_1_1_ressource_1_1_ressource_source.html#af1cbc97212c816f659fbdc204c1dd133',1,'AIModule.Ressource.RessourceSource.amount()']]],
+  ['amountneeded_14',['amountNeeded',['../class_a_i_module_1_1_quest_1_1_quest_active_objective.html#aa0f074765943db79d45c67f7f2097fcb',1,'AIModule.Quest.QuestActiveObjective.amountNeeded()'],['../class_a_i_module_1_1_quest_1_1_quest_passive_objective.html#a578370e23cc14e4a661a6f4699d67fff',1,'AIModule.Quest.QuestPassiveObjective.amountNeeded()'],['../class_a_i_module_1_1_quest_1_1_quest_prerequists.html#a4f022a559e2f417331817acf8fdc939f',1,'AIModule.Quest.QuestPrerequists.amountNeeded()']]],
+  ['armor_15',['armor',['../class_a_i_module_1_1_fight_1_1_squadron.html#a0887c480aa43341deb50edea0c076507',1,'AIModule::Fight::Squadron']]],
+  ['assignedfleet_16',['assignedFleet',['../class_a_i_module_1_1_owners_1_1_alliance.html#a7e3fc2a92f246a70cc57112f9a76d44c',1,'AIModule::Owners::Alliance']]],
+  ['attackfinalfleet_17',['attackFinalFleet',['../class_a_i_module_1_1_report_1_1_fight_report.html#a491eac203418c96996dbacf5a9eaae6a',1,'AIModule::Report::FightReport']]],
+  ['attackinitialfleet_18',['attackInitialFleet',['../class_a_i_module_1_1_report_1_1_fight_report.html#a3e5ba4f8d920307f4b1b03e618292565',1,'AIModule::Report::FightReport']]],
+  ['attackownerid_19',['attackOwnerId',['../class_a_i_module_1_1_events_1_1_fight_event.html#a8e79a89291f66084611ad3181434fd9e',1,'AIModule::Events::FightEvent']]]
+];

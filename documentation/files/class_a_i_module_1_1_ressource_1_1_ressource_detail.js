@@ -1,0 +1,25 @@
+var class_a_i_module_1_1_ressource_1_1_ressource_detail =
+[
+    [ "RessourceDetail", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a24dec455659e33bf0e4ac562dcb9ea04", null ],
+    [ "removeExternalConsumption", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#ab8763bdeda4a35efba1cc1bd80e24116", null ],
+    [ "removeFleetConsumption", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#aee48cbf668a4eabb62495081e18ddb30", null ],
+    [ "updateExternalConsumption", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a18ca188e9c215e00f106eb1ab6d755e3", null ],
+    [ "updateFleetConsumption", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#ac33ae545cc4b1d86c3c8db60b6b43a2b", null ],
+    [ "buildingConsumptions", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#abcc55ccb5a45e94b574323f035552958", null ],
+    [ "calculatedProduction", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a9f13d3ada55813382e32a8775edccbab", null ],
+    [ "calculatedStorage", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a402466d965f1d9a82027b77aea00f2cc", null ],
+    [ "externalConsumptions", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a952a215e09bc5661b920547e6cc9bf23", null ],
+    [ "fleetConsumptions", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a31b15e52c0752f3b955a592ac9db012b", null ],
+    [ "id", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a470511853a71c5cde28a1bf246ea71ea", null ],
+    [ "multipliers", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#afae003d810b2fffce25de8e6df7815bd", null ],
+    [ "productions", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#adb214aa7f778ad3a66f96a78ce6e4f9e", null ],
+    [ "storageMultipliers", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a38c6a7199435ead36b4116c38af92fa1", null ],
+    [ "storages", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a7c51f5622c806169cdbf4d4cf3a2f1ed", null ],
+    [ "taxes", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#ae2943d55de54bb5327d3e39f488fc6fe", null ],
+    [ "totalConsumption", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#ad7f112f69c34e10ca31e63e65186c168", null ],
+    [ "totalMultiplier", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a66453bc983cce0cbd15c44877b625b0d", null ],
+    [ "totalProduction", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#ab5b06686f1f493024f40faf40e859f1e", null ],
+    [ "totalStorage", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a0c9baf032e1944c8ef765d7ec539719a", null ],
+    [ "totalStorageMultiplier", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#a1a3af84dfccbdf12d3324f5a0511aaa8", null ],
+    [ "totalTaxe", "class_a_i_module_1_1_ressource_1_1_ressource_detail.html#afb7f3fb8462bd80eb1d3c11238be531b", null ]
+];

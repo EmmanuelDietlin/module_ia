@@ -1,0 +1,26 @@
+var class_a_i_module_1_1_owners_1_1_owner =
+[
+    [ "Owner", "class_a_i_module_1_1_owners_1_1_owner.html#a800fcccc69cd8e03fde2ec6b3fb2e7a9", null ],
+    [ "Owner", "class_a_i_module_1_1_owners_1_1_owner.html#a1efccc1e9bddc0585e11baca58f083a3", null ],
+    [ "_class", "class_a_i_module_1_1_owners_1_1_owner.html#ac0ea6074d6db1e8f513a9efcde75be8e", null ],
+    [ "agentAmountPerType", "class_a_i_module_1_1_owners_1_1_owner.html#aeb9d1f7759d2b54890847e59039947b6", null ],
+    [ "agentListId", "class_a_i_module_1_1_owners_1_1_owner.html#aaeb8265a20e17dc44746d790a9329f3a", null ],
+    [ "allyIds", "class_a_i_module_1_1_owners_1_1_owner.html#a660ed0d5656e47bbbe0c7318318cc402", null ],
+    [ "baseListId", "class_a_i_module_1_1_owners_1_1_owner.html#ad60947bb8ddff660dac85f9d97c1edbd", null ],
+    [ "description", "class_a_i_module_1_1_owners_1_1_owner.html#aa1ee988353af4a0183ceeea9c50e3629", null ],
+    [ "diplomacyId", "class_a_i_module_1_1_owners_1_1_owner.html#a2d969ed327d0d8558ed5c13c75a3ba0a", null ],
+    [ "effects", "class_a_i_module_1_1_owners_1_1_owner.html#a975aff1d26b90b4d63548dab690598a0", null ],
+    [ "effectSources", "class_a_i_module_1_1_owners_1_1_owner.html#abfeefbc21a0e340f029efc9ea8b137d1", null ],
+    [ "enemyIds", "class_a_i_module_1_1_owners_1_1_owner.html#a0923847dc2bdce4f5ee92eb81f376964", null ],
+    [ "fleetListId", "class_a_i_module_1_1_owners_1_1_owner.html#af387411569106b6064e0ec2f0176fbf2", null ],
+    [ "id", "class_a_i_module_1_1_owners_1_1_owner.html#a948c6e017390942faca3f22ea2ebead3", null ],
+    [ "imageLocation", "class_a_i_module_1_1_owners_1_1_owner.html#a910a82b6b36f33c33af7e225db87bb6e", null ],
+    [ "mainBaseId", "class_a_i_module_1_1_owners_1_1_owner.html#a54563e2794fcee48fb995ed1b217c8ac", null ],
+    [ "money", "class_a_i_module_1_1_owners_1_1_owner.html#abe19d96182685f5b3ec836841dd0ad81", null ],
+    [ "name", "class_a_i_module_1_1_owners_1_1_owner.html#a639955080ec57dd86dc0957cf1e7e805", null ],
+    [ "pendingResearch", "class_a_i_module_1_1_owners_1_1_owner.html#aebbd54ea864222480fa0f28e476b55d6", null ],
+    [ "researchMap", "class_a_i_module_1_1_owners_1_1_owner.html#a918d6ab904c46e3d35a9812241283e6b", null ],
+    [ "type", "class_a_i_module_1_1_owners_1_1_owner.html#aa94e6db9365d67ed2790aba3ed907ee4", null ],
+    [ "version", "class_a_i_module_1_1_owners_1_1_owner.html#aab7af4c8e30a1a768b62a381a6b8cd47", null ],
+    [ "virtualResources", "class_a_i_module_1_1_owners_1_1_owner.html#a07090b95f29f2e55de4c3dd32a5e11de", null ]
+];

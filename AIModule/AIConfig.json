@@ -1,0 +1,392 @@
+﻿[
+  {
+    "name": "Alice",
+    "description": "AI Delta",
+    "personality": "Pacifist",
+    "baseTemplate": "NPC_TEMPLATE_10k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_10k",
+      "deliveryFleet": "NPC_TEMPLATE_10k",
+      "defenseFleet": "NPC_TEMPLATE_10k",
+      "turretFleet": "NPC_TEMPLATE_10k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 1,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "Imperium",
+    "allianceId": "Imperium",
+    "enemyAllianceIds": [ "Fondation" ],
+    "allyAllianceIds":  [],
+    "x_coord": 74,
+    "y_coord": 81,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Bob",
+    "description": "AI Delta",
+    "personality": "Warmonger",
+    "baseTemplate": "NPC_TEMPLATE_100k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_100k",
+      "deliveryFleet": "NPC_TEMPLATE_100k",
+      "defenseFleet": "NPC_TEMPLATE_100k",
+      "turretFleet": "NPC_TEMPLATE_100k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 2,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "Fondation",
+    "allianceId": "Fondation",
+    "enemyAllianceIds": [ "Imperium" ],
+    "allyAllianceIds": [],
+    "x_coord": 80,
+    "y_coord": 78,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Zorg",
+    "description": "AI Delta",
+    "personality": "Trader",
+    "baseTemplate": "NPC_TEMPLATE_100k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_100k",
+      "deliveryFleet": "NPC_TEMPLATE_100k",
+      "defenseFleet": "NPC_TEMPLATE_100k",
+      "turretFleet": "NPC_TEMPLATE_100k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 3,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "Imperium",
+    "allianceId": "Imperium",
+    "enemyAllianceIds": [ "Fondation" ],
+    "allyAllianceIds": [],
+    "x_coord": 81,
+    "y_coord": 82,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Harlock",
+    "description": "AI Delta",
+    "personality": "Warmonger",
+    "baseTemplate": "NPC_TEMPLATE_10k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_10k",
+      "deliveryFleet": "NPC_TEMPLATE_10k",
+      "defenseFleet": "NPC_TEMPLATE_10k",
+      "turretFleet": "NPC_TEMPLATE_10k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 2,
+      "deliveryFleet": 1,
+      "defenseFleet": 1,
+      "turretFleet": 1
+    },
+    "allianceName": "FTU",
+    "allianceId": "FTU",
+    "enemyAllianceIds": [ "Imperium" ],
+    "allyAllianceIds": [],
+    "x_coord": 74,
+    "y_coord": 70,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Seldon",
+    "description": "AI Delta",
+    "personality": "Trader",
+    "baseTemplate": "NPC_TEMPLATE_1m",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_1m",
+      "deliveryFleet": "NPC_TEMPLATE_1m",
+      "defenseFleet": "NPC_TEMPLATE_1m",
+      "turretFleet": "NPC_TEMPLATE_1m"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 3,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "FTU",
+    "allianceId": "FTU",
+    "enemyAllianceIds": [ "Imperium" ],
+    "allyAllianceIds": [],
+    "x_coord": 68,
+    "y_coord": 71,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Flam",
+    "description": "AI Delta",
+    "personality": "Trader",
+    "baseTemplate": "NPC_TEMPLATE_1k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_1k",
+      "deliveryFleet": "NPC_TEMPLATE_1k",
+      "defenseFleet": "NPC_TEMPLATE_1k",
+      "turretFleet": "NPC_TEMPLATE_1k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 2,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "M.A.S.K.",
+    "allianceId": "M.A.S.K.",
+    "enemyAllianceIds": [ "FTU" ],
+    "allyAllianceIds": [],
+    "x_coord": 78,
+    "y_coord": 67,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Horus",
+    "description": "AI Delta",
+    "personality": "Pacifist",
+    "baseTemplate": "NPC_TEMPLATE_1m",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_100k",
+      "deliveryFleet": "NPC_TEMPLATE_100k",
+      "defenseFleet": "NPC_TEMPLATE_100k",
+      "turretFleet": "NPC_TEMPLATE_100k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 2,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "M.A.S.K.",
+    "allianceId": "M.A.S.K.",
+    "enemyAllianceIds": [ "FTU" ],
+    "allyAllianceIds": [],
+    "x_coord": 68,
+    "y_coord": 68,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Caïd",
+    "description": "AI Delta",
+    "personality": "Warmonger",
+    "baseTemplate": "NPC_TEMPLATE_1k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_1k",
+      "deliveryFleet": "NPC_TEMPLATE_1k",
+      "defenseFleet": "NPC_TEMPLATE_1k",
+      "turretFleet": "NPC_TEMPLATE_1k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 2,
+      "deliveryFleet": 1,
+      "defenseFleet": 1,
+      "turretFleet": 1
+    },
+    "allianceName": "M.A.S.K.",
+    "allianceId": "M.A.S.K.",
+    "enemyAllianceIds": [ "FTU" ],
+    "allyAllianceIds": [],
+    "x_coord": 77,
+    "y_coord": 73,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Jayce",
+    "description": "AI Delta",
+    "personality": "Trader",
+    "baseTemplate": "NPC_TEMPLATE_10k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_10k",
+      "deliveryFleet": "NPC_TEMPLATE_10k",
+      "defenseFleet": "NPC_TEMPLATE_10k",
+      "turretFleet": "NPC_TEMPLATE_10k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 2,
+      "deliveryFleet": 1,
+      "defenseFleet": 1,
+      "turretFleet": 1
+    },
+    "allianceName": "MAD",
+    "allianceId": "MAD",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 70,
+    "y_coord": 70,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Cobra",
+    "description": "AI Delta",
+    "personality": "Pacifist",
+    "baseTemplate": "NPC_TEMPLATE_1k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_1k",
+      "deliveryFleet": "NPC_TEMPLATE_1k",
+      "defenseFleet": "NPC_TEMPLATE_1k",
+      "turretFleet": "NPC_TEMPLATE_1k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 1,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "",
+    "allianceId": "",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 50,
+    "y_coord": 50,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Nono",
+    "description": "AI Delta",
+    "personality": "Pacifist",
+    "baseTemplate": "NPC_TEMPLATE_100k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_10k",
+      "deliveryFleet": "NPC_TEMPLATE_10k",
+      "defenseFleet": "NPC_TEMPLATE_100k",
+      "turretFleet": "NPC_TEMPLATE_100k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 1,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "",
+    "allianceId": "",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 69,
+    "y_coord": 66,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Amogus",
+    "description": "AI Delta",
+    "personality": "Warmonger",
+    "baseTemplate": "NPC_TEMPLATE_10k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_10k",
+      "deliveryFleet": "NPC_TEMPLATE_10k",
+      "defenseFleet": "NPC_TEMPLATE_10k",
+      "turretFleet": "NPC_TEMPLATE_10k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 3,
+      "deliveryFleet": 1,
+      "defenseFleet": 1,
+      "turretFleet": 1
+    },
+    "allianceName": "Enterprise",
+    "allianceId": "Enterprise",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 84,
+    "y_coord": 78,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Chiktaba",
+    "description": "AI Delta",
+    "personality": "Warmonger",
+    "baseTemplate": "NPC_TEMPLATE_100k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_100k",
+      "deliveryFleet": "NPC_TEMPLATE_100k",
+      "defenseFleet": "NPC_TEMPLATE_100k",
+      "turretFleet": "NPC_TEMPLATE_100k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 3,
+      "defenseFleet": 1,
+      "turretFleet": 1
+    },
+    "allianceName": "Enterprise",
+    "allianceId": "Enterprise",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 75,
+    "y_coord": 65,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "Luke Marcheciel",
+    "description": "AI Delta",
+    "personality": "Trader",
+    "baseTemplate": "NPC_TEMPLATE_100k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_100k",
+      "deliveryFleet": "NPC_TEMPLATE_100k",
+      "defenseFleet": "NPC_TEMPLATE_100k",
+      "turretFleet": "NPC_TEMPLATE_100k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 2,
+      "deliveryFleet": 2,
+      "defenseFleet": 1,
+      "turretFleet": 1
+    },
+    "allianceName": "DeathStar",
+    "allianceId": "DeathStar",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 74,
+    "y_coord": 76,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  },
+  {
+    "name": "E.T.",
+    "description": "AI Delta",
+    "personality": "Pacifist",
+    "baseTemplate": "NPC_TEMPLATE_10k",
+    "fleetTemplates": {
+      "attackFleet": "NPC_TEMPLATE_10k",
+      "deliveryFleet": "NPC_TEMPLATE_10k",
+      "defenseFleet": "NPC_TEMPLATE_10k",
+      "turretFleet": "NPC_TEMPLATE_10k"
+    },
+    "numberOfFleets": {
+      "attackFleet": 1,
+      "deliveryFleet": 1,
+      "defenseFleet": 2,
+      "turretFleet": 1
+    },
+    "allianceName": "DeathStar",
+    "allianceId": "DeathStar",
+    "enemyAllianceIds": [],
+    "allyAllianceIds": [],
+    "x_coord": 79,
+    "y_coord": 81,
+    "planetName": "TestLand",
+    "type": "AIDELTA"
+  }
+]
