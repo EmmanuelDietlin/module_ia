@@ -4,12 +4,12 @@ Ce projet est le module d'initialisation et de gestion des PNJs du MMO [NeedANam
 
 Pour en savoir plus sur la structure et le fonctionnement des PNJs, vous pouvez vous référer au fichier "Documentation_module_IA.pdf" qui se trouve dans la racine du projet.
 
-La documentation des classes du code se trouve dans le dossier [documentation]("documentation").
+La documentation des classes du code se trouve dans le dossier [documentation](documentation).
 Note : cette documentation doit d'abord être téléchargée pour être consultée
 
 ## Fonctionnalités
 
-Un aperçu des fonctionnalités offertes par le module est disponible [ici]("https://www.youtube.com/watch?v=BKptfp8IUtk&ab_channel=PFEMMO").
+Un aperçu des fonctionnalités offertes par le module est disponible [ici](https://www.youtube.com/watch?v=BKptfp8IUtk&ab_channel=PFEMMO).
 
 Les fonctionnalités principales sont :
 - Système de réputation
