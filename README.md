@@ -4,7 +4,7 @@ Ce projet est le module d'initialisation et de gestion des PNJs du MMO [NeedANam
 
 Pour en savoir plus sur la structure et le fonctionnement des PNJs, vous pouvez vous référer au fichier "Documentation_module_IA.pdf" qui se trouve dans la racine du projet.
 
-La documentation des classes du code se trouve dans le dossier [documentation](documentation).
+La documentation des classes du code se trouve dans le dossier [documentation](documentation_classes).
 Note : cette documentation doit d'abord être téléchargée pour être consultée
 
 Ce projet a été réalisé dans le cadre du Projet de Fin d'Etudes de la filière JIN de Télécom Sudparis et l'ENSIIE.
